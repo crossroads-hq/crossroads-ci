@@ -58,7 +58,11 @@ jobs:
     steps:
       - name: Detect reviewable changes
         id: changes
-        uses: tsviser/crossroads-ci/actions/detect-reviewable@main
+        # Self-reference pinned like any other action -- zizmor enforces the
+        # blanket pin policy on this repository too, and a floating @main here
+        # would be the exact drift channel the fleet just closed. Dependabot
+        # moves the pin.
+        uses: tsviser/crossroads-ci/actions/detect-reviewable@4b914a65343415028de088fa4e380aa91216c36b # main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
