@@ -24,6 +24,15 @@ on:
         type: boolean
         required: false
         default: false
+      osv-scan:
+        description: >-
+          Scan lockfiles against the OSV database. Off for a repository with
+          no lockfiles (the scanner errors on an empty scan set) or one whose
+          KNOWN advisories are tracked toward a fix -- an always-red check
+          teaches people to ignore the gate.
+        type: boolean
+        required: false
+        default: true
       working-directory:
         description: Directory holding package.json, for npm-audit.
         type: string
@@ -52,6 +61,7 @@ jobs:
 
   osv-scan:
     name: OSV scan
+    if: inputs.osv-scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
