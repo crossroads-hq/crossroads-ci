@@ -31,8 +31,9 @@ jobs:
       - name: Shell syntax
         run: |
           set -euo pipefail
-          for f in scripts/*.sh; do bash -n "$f"; done
-          echo "bash -n clean on $(ls scripts/*.sh | wc -l | tr -d ' ') scripts"
+          n=0
+          for f in scripts/*.sh; do bash -n "$f"; n=$((n + 1)); done
+          echo "bash -n clean on ${n} scripts"
 
       - name: shellcheck
         run: shellcheck scripts/*.sh
