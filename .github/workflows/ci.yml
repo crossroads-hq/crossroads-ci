@@ -67,6 +67,12 @@ jobs:
   supply-chain:
     name: Supply chain
     uses: ./.github/workflows/_supply-chain.yml
+    # A called workflow's jobs may not exceed the CALLER's grant, and the
+    # secret-scan job inside now needs pull-requests: read -- omitting it
+    # here fails the whole workflow at startup, before any job exists.
+    permissions:
+      contents: read
+      pull-requests: read
     # No package.json here; the npm-audit leg stays off.
     with:
       npm-audit: false

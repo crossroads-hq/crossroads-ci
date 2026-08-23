@@ -24,6 +24,16 @@ on:
         type: boolean
         required: false
         default: false
+      dependency-review:
+        description: >-
+          Diff-level dependency review. On PRIVATE repositories this API
+          requires a GitHub Advanced Security licence -- the action fails
+          with "Dependency review is not supported on this repository" --
+          so private callers turn it off. Free and on by default for public
+          repositories.
+        type: boolean
+        required: false
+        default: true
       osv-scan:
         description: >-
           Scan lockfiles against the OSV database. Off for a repository with
@@ -45,7 +55,7 @@ permissions:
 jobs:
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    if: inputs.dependency-review && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -81,6 +91,12 @@ jobs:
 
   gitleaks:
     name: Secret scan
+    permissions:
+      contents: read
+      # On a pull_request event the action reads the PR's commit list to
+      # bound its scan range. Public repositories answer that read for any
+      # token; a private repository 403s without this.
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
