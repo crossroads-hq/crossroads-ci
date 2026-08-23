@@ -28,6 +28,14 @@ rules:
   # -- something claiming to be from this machine but not signed by it --
   # cannot land on a protected branch.
   require_signed_commits: true
+  # Copilot reviews every push automatically on repositories under the full
+  # profile. Decision 2026-08-24: crossroads-ui is the fleet's main working
+  # repository and carries the strongest available review stack -- OpenAI
+  # reviewer + Claude reviewer + Copilot -- while the reviewer comparison
+  # continues. Applied fleet-wide for uniformity; if Copilot proves noisy on
+  # the docs/vault repositories, split them to a separate profile rather
+  # than weakening this one.
+  automatic_copilot_review: true
   allow_force_pushes: false
   allow_branch_deletion: false
 
