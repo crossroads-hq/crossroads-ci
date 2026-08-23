@@ -1,0 +1,13 @@
+# Phase 02 of the fleet CI roadmap: Dependabot everywhere, replacing ad-hoc
+# update jobs. Grouped weekly so a quiet week produces one reviewable PR, not
+# ten.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+    groups:
+      actions:
+        patterns: ["*"]
