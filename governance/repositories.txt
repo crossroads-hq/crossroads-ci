@@ -38,10 +38,13 @@ tsviser/crossroads-evolution          full       main
 
 # Tier C — docs / contract repositories
 tsviser/crossroads-agent-system       full       main
-# crossroads-os has no CI yet, so it takes `minimal` until Phase 03 gives it a
-# markdown-lint gate named "PR Validation" — then flip this line to `full`.
-# Note the non-standard default branch.
-tsviser/crossroads-os                 minimal    crossroads-os-v2
+# Vault sanity gate (conflict markers + JSON validity) added 2026-08-23 once
+# Actions billing cleared; the aggregate check name matches the fleet, so the
+# full profile applies. NOTE: full ends direct pushes to the vault branch —
+# every Obsidian sync now lands via a pull request. If that turns out to be
+# unlivable, flip this back to `minimal` and re-run apply-fleet; the gate
+# workflow keeps running either way. Non-standard default branch.
+tsviser/crossroads-os                 full       crossroads-os-v2
 
 # Tier D — live but CI-less. `minimal` until archived or promoted.
 tsviser/evolution-demo                minimal    main
