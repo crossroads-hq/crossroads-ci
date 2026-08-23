@@ -1,0 +1,26 @@
+# Reviewed Crossroads repository list for scripts/apply-solo-owner-rulesets.sh.
+# One owner/repository per line. Blank lines and comments are ignored.
+#
+# Convention: every Crossroads repository names its aggregate gate job
+# "PR Validation", and that is the required status check. The batch script
+# applies one branch and one check context to every entry, so this list holds
+# the repositories that share both.
+#
+# Usage (branch: main, required check: "PR Validation"):
+#   DRY_RUN=1 scripts/apply-solo-owner-rulesets.sh governance/repositories.txt main "PR Validation"
+#            scripts/apply-solo-owner-rulesets.sh governance/repositories.txt main "PR Validation"
+
+tsviser/crossroads-ui
+tsviser/crossroads-agent-system
+tsviser/crossroads-evolution
+tsviser/storybook-live-code-addon
+tsviser/storybook-live-code-sandbox
+
+# Excluded, with reasons:
+#
+#   crossroads-os — default branch is crossroads-os-v2, not main, and the
+#     repository produces no check runs at all. Requiring a status check that
+#     never reports would block every pull request permanently, and there is no
+#     escape: bypass_actors is empty and repository administrators are enforced.
+#     Apply deletion, non-fast-forward and pull-request rules only, by hand,
+#     until the repository has a gate job named "PR Validation".

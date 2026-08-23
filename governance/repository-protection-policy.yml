@@ -1,0 +1,29 @@
+# Crossroads default GitHub repository policy.
+#
+# This is declarative source-of-truth configuration. GitHub does not apply this
+# file automatically; the repository owner must apply the equivalent branch
+# protection/ruleset settings to each repository intentionally.
+version: "1.1"
+scope:
+  branch: main
+  applies_to: every Crossroads repository unless an approved exception exists
+
+rules:
+  pull_request_required: true
+  # Solo-owned repositories cannot provide independent review. Keep the PR
+  # gate and CI gate; require an approval only when a second reviewer exists.
+  required_approvals: 0
+  dismiss_stale_reviews: false
+  require_last_push_approval: false
+  require_conversation_resolution: true
+  require_status_checks:
+    strict: true
+    checks:
+      - "PR Validation"
+  enforce_for_repository_administrators: true
+  allow_force_pushes: false
+  allow_branch_deletion: false
+
+exceptions:
+  process: written decision record naming repository, rule, reason, owner, and expiry
+  default_expiry: 90 days
