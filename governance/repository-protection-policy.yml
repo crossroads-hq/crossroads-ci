@@ -21,6 +21,13 @@ rules:
     checks:
       - "PR Validation"
   enforce_for_repository_administrators: true
+  # Commits reaching a protected branch must carry verified signatures. In
+  # practice main only receives merge commits created through the API, which
+  # GitHub signs itself; local pushes are signed by the machine's SSH signing
+  # key (registered 2026-08-23). The rule's value is that an unsigned commit
+  # -- something claiming to be from this machine but not signed by it --
+  # cannot land on a protected branch.
+  require_signed_commits: true
   allow_force_pushes: false
   allow_branch_deletion: false
 
