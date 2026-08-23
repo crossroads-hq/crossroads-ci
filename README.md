@@ -26,6 +26,7 @@ Here, the JSON profiles are the only copy.
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
+| ~~`.github/workflows/_ai-review.yml`~~ | Retired 2026-08-24: the Claude reviewer produced zero reviews across its comparison window; Copilot-on-push (ruleset rule) and the OpenAI diff reviewer carry AI review. |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
 
 ## Usage
