@@ -1,0 +1,98 @@
+# Reusable: the fleet's supply-chain checks for a pull request.
+#
+# Four independent signals, one workflow:
+#   - dependency review: known-vulnerable or newly-introduced dependencies in
+#     the PR diff (uses the dependency graph; enable it per repository).
+#   - osv-scanner: the full lockfile tree against the OSV database.
+#   - gitleaks: credentials in the diff and history.
+#   - npm audit: registry advisories at high and above (optional; skip for
+#     repositories without a package.json).
+#
+# Free on public and private repositories alike -- none of this requires a
+# GitHub Advanced Security licence. Callers add one job:
+#
+#   supply-chain:
+#     uses: tsviser/crossroads-ci/.github/workflows/_supply-chain.yml@v1
+#     with: { npm-audit: true }
+name: Supply chain
+
+on:
+  workflow_call:
+    inputs:
+      npm-audit:
+        description: Run `npm audit` against the lockfile.
+        type: boolean
+        required: false
+        default: false
+      working-directory:
+        description: Directory holding package.json, for npm-audit.
+        type: string
+        required: false
+        default: "."
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  osv-scan:
+    name: OSV scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan lockfiles against OSV
+        uses: google/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          scan-args: --recursive .
+
+  gitleaks:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: a secret committed then reverted is still leaked.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan for leaked credentials
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm-audit:
+    name: npm audit
+    if: inputs.npm-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Audit lockfile
+        working-directory: ${{ inputs.working-directory }}
+        run: npm audit --audit-level=high

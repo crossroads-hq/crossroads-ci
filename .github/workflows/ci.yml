@@ -1,0 +1,96 @@
+# The control plane validates itself with its own tools.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-lint:
+    name: Workflow lint
+    uses: ./.github/workflows/_workflow-lint.yml
+
+  scripts:
+    name: Scripts and profiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh; do bash -n "$f"; done
+          echo "bash -n clean on $(ls scripts/*.sh | wc -l | tr -d ' ') scripts"
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+      - name: Governance profiles parse and render
+        run: |
+          set -euo pipefail
+          for f in governance/*.json; do jq empty "$f"; done
+          # Every fleet entry must name a profile this repo actually ships,
+          # and the renderer must produce valid JSON for its branch.
+          while read -r repo profile branch _; do
+            case "$repo" in ''|'#'*) continue ;; esac
+            case "$profile" in
+              full|full+tags) pf=governance/ruleset-full.json ;;
+              minimal)        pf=governance/ruleset-minimal.json ;;
+              *) echo "unknown profile '$profile' for $repo" >&2; exit 1 ;;
+            esac
+            jq --arg name "Crossroads ${branch} protection" \
+               --arg ref "refs/heads/${branch}" \
+               '.name = $name | .conditions.ref_name.include = [$ref]' \
+               "$pf" | jq empty
+          done < governance/repositories.txt
+          echo "all fleet entries render"
+
+      - name: Composite actions parse
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'ARGV.each { |f| YAML.safe_load(File.read(f)) }' actions/*/action.yml
+          echo "action.yml files parse"
+
+  supply-chain:
+    name: Supply chain
+    uses: ./.github/workflows/_supply-chain.yml
+    # No package.json here; the npm-audit leg stays off.
+    with:
+      npm-audit: false
+
+  gate:
+    name: PR Validation
+    # The fleet convention, applied to the fleet's own control plane: one
+    # aggregate check with this exact name, so governance/repositories.txt can
+    # list this repository under the `full` profile like any other.
+    if: ${{ !cancelled() }}
+    needs: [workflow-lint, scripts, supply-chain]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check required results
+        uses: ./actions/gate
+        with:
+          results: |
+            {
+              "Workflow lint": "${{ needs.workflow-lint.result }}",
+              "Scripts": "${{ needs.scripts.result }}",
+              "Supply chain": "${{ needs.supply-chain.result }}"
+            }

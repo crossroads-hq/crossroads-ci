@@ -1,26 +1,61 @@
-# Reviewed Crossroads repository list for scripts/apply-solo-owner-rulesets.sh.
-# One owner/repository per line. Blank lines and comments are ignored.
+# Reviewed Crossroads fleet list for scripts/apply-fleet.sh and
+# scripts/verify-fleet.sh.
 #
-# Convention: every Crossroads repository names its aggregate gate job
-# "PR Validation", and that is the required status check. The batch script
-# applies one branch and one check context to every entry, so this list holds
-# the repositories that share both.
+# Format, one repository per line, whitespace-separated:
 #
-# Usage (branch: main, required check: "PR Validation"):
-#   DRY_RUN=1 scripts/apply-solo-owner-rulesets.sh governance/repositories.txt main "PR Validation"
-#            scripts/apply-solo-owner-rulesets.sh governance/repositories.txt main "PR Validation"
+#   owner/repository  profile  branch
+#
+# profile is one of:
+#   full       ruleset-full.json    — requires the "PR Validation" status check.
+#                                     Only for repositories that HAVE a gate job
+#                                     with that exact name: requiring a check
+#                                     that never reports blocks every pull
+#                                     request permanently, with no escape,
+#                                     because bypass_actors is empty and
+#                                     administrators are enforced.
+#   full+tags  ruleset-full.json + tag-ruleset.json — as above, plus v* release
+#                                     tags become immutable. For repositories
+#                                     that publish from a tag push.
+#   minimal    ruleset-minimal.json — pull-request-only merges, no force-push,
+#                                     no deletion, but NO required status check.
+#                                     For repositories with no CI. This profile
+#                                     exists precisely so "no CI yet" stops
+#                                     being a reason to have no protection at
+#                                     all.
+#
+# Blank lines and comments are ignored.
 
-tsviser/crossroads-ui
-tsviser/crossroads-agent-system
-tsviser/crossroads-evolution
-tsviser/storybook-live-code-addon
-tsviser/storybook-live-code-sandbox
+# Control plane — this repository governs itself once its CI gate exists
+tsviser/crossroads-ci                 full       main
+
+# Tier A — published npm packages
+tsviser/storybook-live-code-sandbox   full+tags  main
+tsviser/storybook-live-code-addon     full+tags  main
+
+# Tier B — private applications
+tsviser/crossroads-ui                 full       main
+tsviser/crossroads-evolution          full       main
+
+# Tier C — docs / contract repositories
+tsviser/crossroads-agent-system       full       main
+# crossroads-os has no CI yet, so it takes `minimal` until Phase 03 gives it a
+# markdown-lint gate named "PR Validation" — then flip this line to `full`.
+# Note the non-standard default branch.
+tsviser/crossroads-os                 minimal    crossroads-os-v2
+
+# Tier D — live but CI-less. `minimal` until archived or promoted.
+tsviser/evolution-demo                minimal    main
+tsviser/Product-management-OS         minimal    main
+tsviser/resume-adaptation-assistant   minimal    main
+tsviser/designer-skills               minimal    main
+# Archive candidates (Phase 05). Protected in the meantime; archiving a
+# repository freezes it entirely and supersedes any ruleset.
+tsviser/mini-rag                      minimal    main
+tsviser/receipt-smart-sync            minimal    main
+tsviser/personality-insights-nodejs   minimal    master
+tsviser/apigw-sample-app              minimal    master
 
 # Excluded, with reasons:
 #
-#   crossroads-os — default branch is crossroads-os-v2, not main, and the
-#     repository produces no check runs at all. Requiring a status check that
-#     never reports would block every pull request permanently, and there is no
-#     escape: bypass_actors is empty and repository administrators are enforced.
-#     Apply deletion, non-fast-forward and pull-request rules only, by hand,
-#     until the repository has a gate job named "PR Validation".
+#   storybook-live-code — fork of storybookjs/storybook. Its workflows and
+#     branch model are upstream's; governing it here would fight the fork.

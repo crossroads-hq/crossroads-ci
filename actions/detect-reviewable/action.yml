@@ -1,0 +1,52 @@
+name: Detect reviewable changes
+description: >-
+  Decide whether a pull request contains anything an AI reviewer should look
+  at. Job-level by design: a workflow-level `paths-ignore` would also skip the
+  required verify jobs, leaving a docs-only PR waiting forever on checks that
+  never report. Needs no checkout -- the file list comes from the API.
+
+  The filter treats `docs/` and Markdown as non-reviewable, EXCEPT anything
+  under `.github/` or `.claude/` -- those trees hold the review guidelines,
+  the workflow definitions and the skills contracts, i.e. the rules the
+  reviewer enforces. The previous per-repo copies of this filter exempted the
+  review contract from review; a PR rewriting the reviewer's rules was, by the
+  filter's own logic, not reviewable.
+
+inputs:
+  github-token:
+    description: Token able to read the pull request file list.
+    required: true
+
+outputs:
+  reviewable:
+    description: "'true' when at least one changed file warrants review."
+    value: ${{ steps.detect.outputs.reviewable }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect reviewable changes
+      id: detect
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        files="$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename')"
+        # Two passes, capture-and-test rather than grep exit status: `grep -v`
+        # semantics under `set -e` differ subtly across shells, and `|| true`
+        # keeps a no-match from aborting the step.
+        # Pass 1: anything under .github/ or .claude/ is always reviewable.
+        contract_files="$(printf '%s\n' "$files" | grep -E '^\.(github|claude)/' || true)"
+        # Pass 2: outside those trees, docs/ and Markdown are not reviewable.
+        code_files="$(printf '%s\n' "$files" | grep -vE '^\.(github|claude)/' | grep -vE '^docs/|\.md$' || true)"
+        if [ -n "$contract_files" ] || [ -n "$code_files" ]; then
+          count="$(printf '%s\n%s\n' "$contract_files" "$code_files" | grep -c . || true)"
+          echo "Reviewing ${count} file(s)." >> "$GITHUB_STEP_SUMMARY"
+          echo "reviewable=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "Documentation-only change; skipping AI review." >> "$GITHUB_STEP_SUMMARY"
+          echo "reviewable=false" >> "$GITHUB_OUTPUT"
+        fi

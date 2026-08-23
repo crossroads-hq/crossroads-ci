@@ -1,0 +1,61 @@
+name: Crossroads gate
+description: >-
+  The fleet's aggregate "PR Validation" gate logic. The calling job keeps the
+  name -- GitHub stores a required status check as plain text, and a job that
+  merely CALLS a reusable workflow reports as "caller / callee", which would
+  silently break every protection rule in the fleet. A composite action leaves
+  the caller's check context untouched; only the logic lives here.
+
+  The caller stays responsible for two things this action cannot reach:
+  `if: ${{ !cancelled() }}` on the job (a run superseded by a new push should
+  render no verdict at all, not a red check), and the `needs:` list.
+
+inputs:
+  results:
+    description: >-
+      JSON object mapping a human-readable job name to its `needs.<job>.result`,
+      e.g. '{"Verification": "${{ needs.verify.result }}"}'. Every entry must
+      be `success` to pass, unless listed in allow-skipped.
+    required: true
+  allow-skipped:
+    description: >-
+      Whitespace-separated names from `results` for which `skipped` also
+      passes. For jobs with their own legitimate skip conditions -- an AI
+      review that sits out docs-only diffs, a publish-check that only runs on
+      main. A skip only ever excuses a job that chose not to run; `cancelled`
+      and `failure` never pass.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check required results
+      shell: bash
+      env:
+        RESULTS: ${{ inputs.results }}
+        ALLOW_SKIPPED: ${{ inputs.allow-skipped }}
+      # Node rather than jq: every runner in the fleet has node (the
+      # self-hosted Macs run the repos' own toolchains), while jq is not
+      # guaranteed outside ubuntu-latest.
+      run: |
+        node - <<'NODE'
+        const results = JSON.parse(process.env.RESULTS);
+        const allowSkipped = new Set(
+          (process.env.ALLOW_SKIPPED || "").split(/\s+/).filter(Boolean)
+        );
+
+        let failed = false;
+        for (const [name, result] of Object.entries(results)) {
+          console.log(`${name}: ${result}`);
+          if (result === "success") continue;
+          if (result === "skipped" && allowSkipped.has(name)) continue;
+          console.error(
+            result === "cancelled"
+              ? `${name} was cancelled while this run stayed live; a required job that did not finish cannot pass the gate.`
+              : `${name} did not pass (${result}).`
+          );
+          failed = true;
+        }
+        process.exit(failed ? 1 : 0);
+        NODE

@@ -27,3 +27,21 @@ rules:
 exceptions:
   process: written decision record naming repository, rule, reason, owner, and expiry
   default_expiry: 90 days
+
+decisions:
+  - id: zero-approvals
+    rule: required_approvals stays 0
+    reason: >-
+      A solo repository owner cannot approve their own pull request; any value
+      above zero blocks every merge. While this holds, the AI reviewer plus the
+      PR Validation gate are the only review a change receives.
+    owner: tsviser
+    review_by: "2026-11-23"
+  - id: merge-methods
+    rule: allowed_merge_methods stays [merge, squash, rebase]
+    reason: >-
+      Matches live fleet behaviour. Narrowing to squash-only was proposed in
+      the CI roadmap and is deliberately not bundled into the control-plane
+      migration; adopt it, if at all, as its own reviewed change.
+    owner: tsviser
+    review_by: "2026-11-23"

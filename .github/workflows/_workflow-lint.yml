@@ -1,0 +1,52 @@
+# Reusable: lint the CALLER's workflow files with actionlint and zizmor.
+#
+# Callable because its check name is not load-bearing anywhere -- reusable
+# workflows report as "caller / callee", which is fine for any job that is not
+# itself the required "PR Validation" context. The gate logic, whose name IS
+# load-bearing, lives in actions/gate instead.
+name: Workflow lint
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Docker image pinned by tag; the tag maps to the same release as the
+      # SHA-pinned binary and avoids maintaining a checksum table here.
+      - name: Run actionlint
+        run: |
+          docker run --rm -v "${PWD}:/repo" --workdir /repo \
+            rhysd/actionlint:1.7.12 -color
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `--persona=regular` and non-zero only on findings at `high` and
+        # above: the fleet's self-hosted-runner jobs trip zizmor's
+        # lower-severity audits by design (documented in each workflow), and a
+        # linter that cries wolf gets removed. Tighten once the Phase 04
+        # runner hardening lands.
+        run: |
+          pipx run zizmor==1.11.0 --min-severity=high .github/workflows/
