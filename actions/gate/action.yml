@@ -35,32 +35,24 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Check required results
+    # Two OS-gated invocations of the same file, because the fleet's runners
+    # do not share a shell: the Windows backup has no bash (its first routed
+    # gate died on `bash: command not found`), and macOS has no powershell.
+    # The logic lives once, in check.js; node is the only real dependency.
+    - name: Check required results (POSIX)
+      if: runner.os != 'Windows'
       shell: bash
       env:
         RESULTS: ${{ inputs.results }}
         ALLOW_SKIPPED: ${{ inputs.allow-skipped }}
-      # Node rather than jq: every runner in the fleet has node (the
-      # self-hosted Macs run the repos' own toolchains), while jq is not
-      # guaranteed outside ubuntu-latest.
-      run: |
-        node - <<'NODE'
-        const results = JSON.parse(process.env.RESULTS);
-        const allowSkipped = new Set(
-          (process.env.ALLOW_SKIPPED || "").split(/\s+/).filter(Boolean)
-        );
+      run: node "${{ github.action_path }}/check.js"
 
-        let failed = false;
-        for (const [name, result] of Object.entries(results)) {
-          console.log(`${name}: ${result}`);
-          if (result === "success") continue;
-          if (result === "skipped" && allowSkipped.has(name)) continue;
-          console.error(
-            result === "cancelled"
-              ? `${name} was cancelled while this run stayed live; a required job that did not finish cannot pass the gate.`
-              : `${name} did not pass (${result}).`
-          );
-          failed = true;
-        }
-        process.exit(failed ? 1 : 0);
-        NODE
+    - name: Check required results (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        RESULTS: ${{ inputs.results }}
+        ALLOW_SKIPPED: ${{ inputs.allow-skipped }}
+      run: |
+        node "${{ github.action_path }}/check.js"
+        exit $LASTEXITCODE
