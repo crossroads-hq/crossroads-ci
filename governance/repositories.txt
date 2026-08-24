@@ -56,6 +56,6 @@ tsviser/designer-skills               minimal    main
 #   storybook-live-code — fork of storybookjs/storybook. Its workflows and
 #     branch model are upstream's; governing it here would fight the fork.
 #   mini-rag, receipt-smart-sync, personality-insights-nodejs,
-#   apigw-sample-app — ARCHIVED 2026-08-24 (last activity Feb 2026 back to
-#     2015). Archiving freezes a repository entirely and supersedes any
+#   apigw-sample-app — ARCHIVED 2026-08-24 (most recent last-commit dates range from 2015 to
+#     Feb 2026). Archiving freezes a repository entirely and supersedes any
 #     ruleset; unarchive first if one ever comes back, then re-add here.
