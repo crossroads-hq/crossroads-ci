@@ -51,14 +51,11 @@ tsviser/evolution-demo                minimal    main
 tsviser/Product-management-OS         minimal    main
 tsviser/resume-adaptation-assistant   minimal    main
 tsviser/designer-skills               minimal    main
-# Archive candidates (Phase 05). Protected in the meantime; archiving a
-# repository freezes it entirely and supersedes any ruleset.
-tsviser/mini-rag                      minimal    main
-tsviser/receipt-smart-sync            minimal    main
-tsviser/personality-insights-nodejs   minimal    master
-tsviser/apigw-sample-app              minimal    master
-
 # Excluded, with reasons:
 #
 #   storybook-live-code — fork of storybookjs/storybook. Its workflows and
 #     branch model are upstream's; governing it here would fight the fork.
+#   mini-rag, receipt-smart-sync, personality-insights-nodejs,
+#   apigw-sample-app — ARCHIVED 2026-08-24 (most recent last-commit dates range from 2015 to
+#     Feb 2026). Archiving freezes a repository entirely and supersedes any
+#     ruleset; unarchive first if one ever comes back, then re-add here.
