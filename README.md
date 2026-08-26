@@ -22,6 +22,7 @@ Here, the JSON profiles are the only copy.
 | `governance/tag-ruleset.json` | `v*` release tags immutable, for repositories that publish from a tag push. |
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
 | `scripts/verify-fleet.sh` | Prove the fleet still matches the profiles. Exit 1 on drift. |
+| `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
@@ -32,6 +33,7 @@ Here, the JSON profiles are the only copy.
 ## Usage
 
 ```sh
+scripts/validate-local.sh           # preflight before push
 scripts/apply-fleet.sh              # plan (default; mutates nothing)
 APPLY=1 scripts/apply-fleet.sh      # apply
 scripts/verify-fleet.sh             # drift check; nonzero exit on divergence
@@ -50,9 +52,9 @@ jobs:
     if: ${{ !cancelled() }}
     needs: [verify, supply-chain]
     runs-on: ubuntu-latest
+    # No checkout when pinning the remote action (crossroads-ui pattern).
+    # This repo's ci.yml checks out because it calls ./actions/gate locally.
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
       - uses: tsviser/crossroads-ci/actions/gate@main
         with:
           results: |
