@@ -142,8 +142,14 @@ jobs:
     needs: [changes, workflow-lint, scripts, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # No checkout: the composite reads job results only, not the repository.
     steps:
+      # Local composite (`./actions/gate`): checkout required so action.yml
+      # is on disk. Fleet callers use the remote pin and omit this step.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Check required results
         uses: ./actions/gate
         with:
