@@ -24,11 +24,11 @@ inputs:
     required: true
   allow-skipped:
     description: >-
-      Whitespace-separated names from `results` for which `skipped` also
-      passes. For jobs with their own legitimate skip conditions -- an AI
-      review that sits out docs-only diffs, a publish-check that only runs on
-      main. A skip only ever excuses a job that chose not to run; `cancelled`
-      and `failure` never pass.
+      Names from `results` for which `skipped` also passes, one per line.
+      For jobs with their own legitimate skip conditions -- an AI review that
+      sits out docs-only diffs, a path-filtered verify leg, a publish-check
+      that only runs on main. A skip only ever excuses a job that chose not to
+      run; `cancelled` and `failure` never pass.
     required: false
     default: ""
 

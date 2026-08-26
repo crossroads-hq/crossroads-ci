@@ -4,6 +4,9 @@
 # workflows report as "caller / callee", which is fine for any job that is not
 # itself the required "PR Validation" context. The gate logic, whose name IS
 # load-bearing, lives in actions/gate instead.
+#
+# One job, one checkout: actionlint and zizmor are fast and share the same
+# tree; splitting them doubled runner startup for no wall-clock win.
 name: Workflow lint
 
 on:
@@ -13,8 +16,8 @@ permissions:
   contents: read
 
 jobs:
-  actionlint:
-    name: actionlint
+  lint:
+    name: Workflow lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,16 +32,6 @@ jobs:
         run: |
           docker run --rm -v "${PWD}:/repo" --workdir /repo \
             rhysd/actionlint:1.7.12 -color
-
-  zizmor:
-    name: zizmor
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
 
       - name: Run zizmor
         env:

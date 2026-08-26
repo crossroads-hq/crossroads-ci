@@ -3,8 +3,12 @@
 // its first routed job died on `bash: command not found`. A file needs only
 // node, which every runner carries.
 const results = JSON.parse(process.env.RESULTS);
+// One name per line so multi-word labels like "Workflow lint" survive intact.
 const allowSkipped = new Set(
-  (process.env.ALLOW_SKIPPED || "").split(/\s+/).filter(Boolean)
+  (process.env.ALLOW_SKIPPED || "")
+    .split(/\r?\n/)
+    .map((name) => name.trim())
+    .filter(Boolean)
 );
 
 let failed = false;
