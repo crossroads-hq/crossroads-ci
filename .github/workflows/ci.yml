@@ -14,12 +14,63 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      workflow: ${{ steps.filter.outputs.workflow }}
+      scripts: ${{ steps.filter.outputs.scripts }}
+      supply-chain: ${{ steps.filter.outputs.supply-chain }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Job-level filters, not workflow-level paths-ignore: a docs-only PR
+      # must still report PR Validation, with verify jobs skipped rather than
+      # never scheduled. Same rationale as actions/detect-reviewable.
+      - name: Path filter
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            workflow:
+              - '.github/**'
+            scripts:
+              - 'scripts/**'
+              - 'governance/**'
+              - 'actions/**'
+            supply-chain:
+              - '.github/**'
+              - 'scripts/**'
+              - 'governance/**'
+              - 'actions/**'
+              - '**/*lock*'
+              - '**/package.json'
+              - '**/package-lock.json'
+              - '**/yarn.lock'
+              - '**/pnpm-lock.yaml'
+              - '**/Gemfile.lock'
+              - '**/poetry.lock'
+              - '**/go.sum'
+              - '**/Cargo.lock'
+
   workflow-lint:
     name: Workflow lint
+    needs: changes
+    if: >-
+      github.event_name == 'push' ||
+      needs.changes.outputs.workflow == 'true'
     uses: ./.github/workflows/_workflow-lint.yml
 
   scripts:
     name: Scripts and profiles
+    needs: changes
+    if: >-
+      github.event_name == 'push' ||
+      needs.changes.outputs.scripts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -66,6 +117,10 @@ jobs:
 
   supply-chain:
     name: Supply chain
+    needs: changes
+    if: >-
+      github.event_name == 'push' ||
+      needs.changes.outputs.supply-chain == 'true'
     uses: ./.github/workflows/_supply-chain.yml
     # A called workflow's jobs may not exceed the CALLER's grant, and the
     # secret-scan job inside now needs pull-requests: read -- omitting it
@@ -83,7 +138,7 @@ jobs:
     # aggregate check with this exact name, so governance/repositories.txt can
     # list this repository under the `full` profile like any other.
     if: ${{ !cancelled() }}
-    needs: [workflow-lint, scripts, supply-chain]
+    needs: [changes, workflow-lint, scripts, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -95,6 +150,10 @@ jobs:
       - name: Check required results
         uses: ./actions/gate
         with:
+          allow-skipped: |
+            Workflow lint
+            Scripts
+            Supply chain
           results: |
             {
               "Workflow lint": "${{ needs.workflow-lint.result }}",

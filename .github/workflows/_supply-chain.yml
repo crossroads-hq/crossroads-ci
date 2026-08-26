@@ -1,12 +1,11 @@
 # Reusable: the fleet's supply-chain checks for a pull request.
 #
-# Four independent signals, one workflow:
+# Three jobs, one workflow:
 #   - dependency review: known-vulnerable or newly-introduced dependencies in
 #     the PR diff (uses the dependency graph; enable it per repository).
-#   - osv-scanner: the full lockfile tree against the OSV database.
+#   - lockfile checks: OSV scan and optional npm audit share one shallow
+#     checkout; keep them separate from gitleaks, which needs full history.
 #   - gitleaks: credentials in the diff and history.
-#   - npm audit: registry advisories at high and above (optional; skip for
-#     repositories without a package.json).
 #
 # Free on public and private repositories alike -- none of this requires a
 # GitHub Advanced Security licence. Callers add one job:
@@ -69,9 +68,9 @@ jobs:
         with:
           fail-on-severity: high
 
-  osv-scan:
-    name: OSV scan
-    if: inputs.osv-scan
+  lockfile-checks:
+    name: Lockfile checks
+    if: inputs.osv-scan || inputs.npm-audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -81,6 +80,7 @@ jobs:
           persist-credentials: false
 
       - name: Scan lockfiles against OSV
+        if: inputs.osv-scan
         # The SUBDIRECTORY action, not the repository root: the root action.yml
         # at this tag is a metadata stub with no `runs:` section and fails to
         # load. Verified: osv-scanner-action/action.yml carries the docker
@@ -88,6 +88,11 @@ jobs:
         uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           scan-args: --recursive .
+
+      - name: Audit lockfile
+        if: inputs.npm-audit
+        working-directory: ${{ inputs.working-directory }}
+        run: npm audit --audit-level=high
 
   gitleaks:
     name: Secret scan
@@ -111,18 +116,3 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  npm-audit:
-    name: npm audit
-    if: inputs.npm-audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Audit lockfile
-        working-directory: ${{ inputs.working-directory }}
-        run: npm audit --audit-level=high
