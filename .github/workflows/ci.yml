@@ -128,9 +128,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    # No package.json here; the npm-audit leg stays off.
+    # No package.json or lockfiles here; osv-scan and npm-audit stay off.
     with:
       npm-audit: false
+      osv-scan: false
 
   gate:
     name: PR Validation
@@ -141,12 +142,8 @@ jobs:
     needs: [changes, workflow-lint, scripts, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # No checkout: the composite reads job results only, not the repository.
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Check required results
         uses: ./actions/gate
         with:
