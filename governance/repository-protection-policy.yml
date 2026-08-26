@@ -13,7 +13,9 @@ rules:
   # Solo-owned repositories cannot provide independent review. Keep the PR
   # gate and CI gate; require an approval only when a second reviewer exists.
   required_approvals: 0
-  dismiss_stale_reviews: false
+  # Copilot re-reviews every push; without dismissal, a single active PR
+  # accumulates a dozen stale review threads that no longer match the diff.
+  dismiss_stale_reviews: true
   require_last_push_approval: false
   require_conversation_resolution: true
   require_status_checks:
@@ -58,5 +60,14 @@ decisions:
       Matches live fleet behaviour. Narrowing to squash-only was proposed in
       the CI roadmap and is deliberately not bundled into the control-plane
       migration; adopt it, if at all, as its own reviewed change.
+    owner: tsviser
+    review_by: "2026-11-23"
+  - id: dismiss-stale-reviews
+    rule: dismiss_stale_reviews_on_push is true on every profile
+    reason: >-
+      Copilot review_on_push fires on every synchronize; with dismissal off,
+      one PR accumulated fourteen separate review submissions whose comments
+      pointed at superseded commits. Dismissal clears outdated threads without
+      blocking merge — required_approving_review_count stays 0.
     owner: tsviser
     review_by: "2026-11-23"
