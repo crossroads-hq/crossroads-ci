@@ -52,7 +52,8 @@ jobs:
     if: ${{ !cancelled() }}
     needs: [verify, supply-chain]
     runs-on: ubuntu-latest
-    # No checkout: the composite reads job results only.
+    # No checkout when pinning the remote action (crossroads-ui pattern).
+    # This repo's ci.yml checks out because it calls ./actions/gate locally.
     steps:
       - uses: tsviser/crossroads-ci/actions/gate@main
         with:
