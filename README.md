@@ -22,6 +22,7 @@ Here, the JSON profiles are the only copy.
 | `governance/tag-ruleset.json` | `v*` release tags immutable, for repositories that publish from a tag push. |
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
 | `scripts/verify-fleet.sh` | Prove the fleet still matches the profiles. Exit 1 on drift. |
+| `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on a pin that does not resolve; `STRICT=1` also fails on any pin that is behind. |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
@@ -36,7 +37,8 @@ Here, the JSON profiles are the only copy.
 scripts/validate-local.sh           # preflight before push
 scripts/apply-fleet.sh              # plan (default; mutates nothing)
 APPLY=1 scripts/apply-fleet.sh      # apply
-scripts/verify-fleet.sh             # drift check; nonzero exit on divergence
+scripts/verify-fleet.sh             # ruleset drift; nonzero exit on divergence
+scripts/verify-pins.sh              # which control-plane version each repo runs
 ```
 
 Caller-side, in any fleet repository:
