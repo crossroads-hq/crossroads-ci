@@ -23,7 +23,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
 | `scripts/verify-fleet.sh` | Prove the fleet still matches the profiles. Exit 1 on drift. |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
-| `actions/gate` | The aggregate-gate logic. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
+| `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
@@ -73,6 +73,14 @@ workflows because Actions access is set to `user` scope
 - **`full` requires a gate to exist.** Applying it to a repository that never
   reports the check blocks every PR permanently — `bypass_actors` is empty and
   administrators are enforced. That is what `minimal` is for.
+- **Excusing a skip means requiring its filter job.** A job skips when a job
+  it `needs` fails, so a path-filter job left out of `results` can fail, skip
+  every leg it feeds, and let the gate pass on excused skips alone. List the
+  filter job in `results` and keep it out of `allow-skipped`.
+- **The secret scan is not path-filtered.** Gating `_supply-chain.yml` on
+  changed paths skips gitleaks along with everything else, and a credential
+  pasted into a README is the ordinary case. Filter the lockfile legs with the
+  workflow's own inputs instead.
 - **Changes to `governance/` are governance decisions**, reviewed as such.
   Exceptions are temporary, owned, and carry an expiry — see
   `repository-protection-policy.yml`.

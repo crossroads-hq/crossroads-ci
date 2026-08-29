@@ -21,7 +21,6 @@ jobs:
     outputs:
       workflow: ${{ steps.filter.outputs.workflow }}
       scripts: ${{ steps.filter.outputs.scripts }}
-      supply-chain: ${{ steps.filter.outputs.supply-chain }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,20 +41,6 @@ jobs:
               - 'scripts/**'
               - 'governance/**'
               - 'actions/**'
-            supply-chain:
-              - '.github/**'
-              - 'scripts/**'
-              - 'governance/**'
-              - 'actions/**'
-              - '**/*lock*'
-              - '**/package.json'
-              - '**/package-lock.json'
-              - '**/yarn.lock'
-              - '**/pnpm-lock.yaml'
-              - '**/Gemfile.lock'
-              - '**/poetry.lock'
-              - '**/go.sum'
-              - '**/Cargo.lock'
 
   workflow-lint:
     name: Workflow lint
@@ -113,14 +98,25 @@ jobs:
         run: |
           set -euo pipefail
           ruby -ryaml -e 'ARGV.each { |f| YAML.safe_load(File.read(f)) }' actions/*/action.yml
-          echo "action.yml files parse"
+          node --check actions/*/*.js
+          echo "action.yml files parse; action scripts parse"
+
+      # The merge gate for every repository in the fleet. It shipped untested
+      # -- and unparsed -- until now; a typo here reaches all of them at once.
+      - name: Gate logic tests
+        run: node --test actions/gate/check.test.js
 
   supply-chain:
     name: Supply chain
-    needs: changes
-    if: >-
-      github.event_name == 'push' ||
-      needs.changes.outputs.supply-chain == 'true'
+    # UNCONDITIONAL, and not in the gate's allow-skipped below. This job was
+    # path-filtered for speed; the filter did not match a root-level file, so a
+    # PR touching only README.md skipped the whole workflow -- including the
+    # gitleaks scan. A pasted credential in documentation is the ordinary case,
+    # not the exotic one, and the scan's own rationale ("a secret committed
+    # then reverted is still leaked") applies to every diff or none. The legs
+    # that genuinely depend on changed paths -- osv-scan, npm-audit -- are off
+    # by input below, so skipping the rest bought a few seconds on docs-only
+    # pull requests and nothing else.
     uses: ./.github/workflows/_supply-chain.yml
     # A called workflow's jobs may not exceed the CALLER's grant, and the
     # secret-scan job inside now needs pull-requests: read -- omitting it
@@ -156,9 +152,17 @@ jobs:
           allow-skipped: |
             Workflow lint
             Scripts
-            Supply chain
+          # "Detect changes" is REQUIRED, deliberately absent from
+          # allow-skipped: it carries no `if:`, so it never legitimately skips.
+          # Omitting it entirely -- as this gate did until now -- was a hole.
+          # A failed `changes` makes GitHub mark every job that needs it
+          # `skipped`; each of those skips was excused here, so the gate
+          # reported success having validated nothing. The rule this encodes:
+          # whenever a job's skip is excused, the job that decides whether it
+          # skips must itself be required.
           results: |
             {
+              "Detect changes": "${{ needs.changes.result }}",
               "Workflow lint": "${{ needs.workflow-lint.result }}",
               "Scripts": "${{ needs.scripts.result }}",
               "Supply chain": "${{ needs.supply-chain.result }}"

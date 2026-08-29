@@ -2,7 +2,33 @@
 // run on every runner in the fleet, and the Windows backup has no bash --
 // its first routed job died on `bash: command not found`. A file needs only
 // node, which every runner carries.
-const results = JSON.parse(process.env.RESULTS);
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+let results;
+try {
+  results = JSON.parse(process.env.RESULTS);
+} catch (error) {
+  // A caller builds `results` by interpolating expressions into a JSON
+  // literal; one unquoted value and this is the only thing standing between a
+  // malformed payload and a gate that checks nothing.
+  fail(`results is not valid JSON: ${error.message}`);
+}
+
+if (results === null || typeof results !== "object" || Array.isArray(results)) {
+  fail("results must be a JSON object mapping job name to result.");
+}
+
+// An empty map is the failure this gate exists to prevent: it would pass every
+// entry it was given, having been given none. The gate never legitimately has
+// nothing to check -- a caller with no required jobs does not need a gate.
+if (Object.keys(results).length === 0) {
+  fail("results is empty; a gate cannot pass a run it was asked to check nothing about.");
+}
+
 // One name per line so multi-word labels like "Workflow lint" survive intact.
 const allowSkipped = new Set(
   (process.env.ALLOW_SKIPPED || "")
