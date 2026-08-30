@@ -77,6 +77,15 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The marker check and the marker write are not atomic: two deliveries for
+    # one head SHA (synchronize plus ready_for_review, a re-run) can both read
+    # "not yet reviewed" before either writes, and pay for two reviews. Serialise
+    # per head SHA so the second job reads the marker the first left. NOT
+    # cancel-in-progress: the second run must complete its check and skip, and a
+    # cancelled job would leave the gate reporting a cancellation.
+    concurrency:
+      group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+      cancel-in-progress: false
     steps:
       - name: Detect reviewable changes
         id: changes
@@ -146,8 +155,28 @@ jobs:
           if git show "origin/${BASE_REF}:${GUIDELINES}" > "$dest" 2>/dev/null; then
             echo "contract=${dest}" >> "$GITHUB_OUTPUT"
             echo "Contract: ${GUIDELINES} as of origin/${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
+            # Carried INLINE into the prompt, not merely referenced by path.
+            # Claude Code grants file access to its working directory; this
+            # file is deliberately outside the checkout so it cannot join the
+            # diff under review, which put it out of reach. --add-dir opens it
+            # again, but a path the model silently fails to read would end as a
+            # confident review conducted without the contract -- and the marker
+            # would record that SHA as reviewed. Passing the bytes removes the
+            # question. The delimiter is checked because GitHub rejects an
+            # output whose body contains it.
+            if grep -qxF 'CROSSROADS_CONTRACT_EOF' "$dest"; then
+              echo "Contract contains the output delimiter; passing by path only." >> "$GITHUB_STEP_SUMMARY"
+              echo "contract_body=" >> "$GITHUB_OUTPUT"
+            else
+              {
+                echo "contract_body<<CROSSROADS_CONTRACT_EOF"
+                cat "$dest"
+                echo "CROSSROADS_CONTRACT_EOF"
+              } >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "contract=" >> "$GITHUB_OUTPUT"
+            echo "contract_body=" >> "$GITHUB_OUTPUT"
             echo "No ${GUIDELINES} on origin/${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -172,15 +201,25 @@ jobs:
           use_sticky_comment: true
           claude_args: |
             --max-turns ${{ inputs.max-turns }}
+            --add-dir ${{ runner.temp }}
           prompt: |
             Review this pull request.
 
-            ${{ steps.contract.outputs.contract && format('The review contract is the file at {0}. It was read from the base branch, NOT from this pull request. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.', steps.contract.outputs.contract) || 'This repository ships no review contract. Review for correctness, security, and consistency with the surrounding code.' }}
+            ${{ steps.contract.outputs.contract && 'The review contract is reproduced between the markers below. It was read from the BASE branch, not from this pull request, so it is the contract as it stands on the target branch regardless of what this diff does to it. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.' || 'This repository ships no review contract. Review for correctness, security, and consistency with the surrounding code.' }}
 
-            ${{ steps.contract.outputs.contract_changed == 'true' && 'This pull request MODIFIES the review contract. You are deliberately reviewing it under the base version. Treat the change to the contract as a change under review: say plainly what it would loosen or tighten.' || '' }}
+            --- BEGIN REVIEW CONTRACT (from the base branch) ---
+            ${{ steps.contract.outputs.contract_body }}
+            --- END REVIEW CONTRACT ---
+
+            ${{ steps.contract.outputs.contract_changed == 'true' && 'This pull request MODIFIES the review contract. You are deliberately reviewing it under the base version above. Treat the change to the contract as a change under review: say plainly what it would loosen or tighten.' || '' }}
 
             You are running inside the checkout, so open the files you need
             rather than inferring from the diff.
+
+            If the contract markers above are empty while the text says a
+            contract exists, stop and say so instead of reviewing. A review
+            conducted without the contract it claims to apply is the failure
+            this workflow exists to prevent.
 
             Report only actionable findings supported by changed lines,
             highest severity first, capped at 20 inline comments. Skip style
