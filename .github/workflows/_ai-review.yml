@@ -130,19 +130,39 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          # Reusable-workflow jobs report as "<caller job> / <callee job>", so
-          # the caller's naming is unknown here and only the suffix is fixed.
-          # The current run's own check is in_progress with a null conclusion
-          # and cannot match.
-          # --slurp piped to jq, NOT --jq. Under --paginate, gh applies --jq to
-          # each page separately, so `| length` emits one integer per page --
-          # verified: a six-page query returned "1 1 1 2 2 1". The comparison
-          # below would then be run on a multi-word string. --slurp hands jq
-          # every page at once and yields a single count.
-          prior="$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs" --paginate --slurp \
-            | jq '[.[].check_runs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
+          # Scoped to the CALLER'S OWN WORKFLOW FILE, not to any check run that
+          # happens to carry this job's name. A check run records no workflow
+          # path -- measured: name and app only -- so matching on the name
+          # alone accepted a job called "Claude review" anywhere in the
+          # repository, including one a pull request adds in a workflow of its
+          # own. It could succeed in seconds and the real review would skip:
+          # the same tamper class as the comment marker this replaced, one
+          # layer further in.
+          #
+          # A workflow RUN does carry `.path`. Filtering this head SHA's runs
+          # to the caller's own workflow file, then reading that run's jobs,
+          # leaves one way to forge a match -- edit the caller workflow itself
+          # -- which is the residual already documented in the README, not a
+          # separate hole.
+          #
+          # The current run is in this list; its own job is in_progress with a
+          # null conclusion and cannot match.
+          wf_path="${WORKFLOW_REF%%@*}"   # owner/repo/.github/workflows/x.yml
+          wf_path="${wf_path#*/}"         # repo/.github/workflows/x.yml
+          wf_path="${wf_path#*/}"         # .github/workflows/x.yml
+
+          prior=0
+          for rid in $(gh api "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+              --paginate --slurp \
+              | jq -r --arg p "$wf_path" '.[].workflow_runs[] | select(.path == $p) | .id'); do
+            n="$(gh api "repos/${REPO}/actions/runs/${rid}/jobs" --paginate --slurp \
+              | jq '[.[].jobs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
+            prior=$((prior + n))
+          done
+
           if [ "${prior:-0}" -gt 0 ]; then
             echo "Head ${HEAD_SHA} already has a successful Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -424,9 +444,9 @@ jobs:
           # per page and `$((comments + reviews))` fails the moment a pull
           # request passes 100 comments. `.[][]` flattens the page array.
           comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp \
-            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at >= \"${SINCE}\"))] | length")"
           reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp \
-            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at > \"${SINCE}\"))] | length")"
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at >= \"${SINCE}\"))] | length")"
           # INLINE review comments live at /pulls/{n}/comments -- a different
           # endpoint from both of the above. The tool this workflow now grants,
           # mcp__github_inline_comment__create_inline_comment, posts here, and
@@ -436,7 +456,7 @@ jobs:
           # dedup -- the granted tool working perfectly and the guard calling
           # it a failure.
           inline="$(gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --slurp \
-            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at >= \"${SINCE}\"))] | length")"
           total=$((comments + reviews + inline))
           if [ "$total" -eq 0 ]; then
             {
