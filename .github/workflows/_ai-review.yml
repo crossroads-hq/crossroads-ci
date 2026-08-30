@@ -216,6 +216,35 @@ jobs:
             esac
           done
 
+          # Validate before it reaches a URL. `guidelines-file` is caller
+          # controlled, and on a pull_request the caller workflow comes from
+          # the merge ref -- so the pull request under review can set it. It is
+          # then interpolated into `contents/${GUIDELINES}?ref=${BASE_REF}`,
+          # where a `?` starts a query of the attacker's choosing and the FIRST
+          # ref wins. Measured against this repository:
+          #
+          #   guidelines-file: 'README.md?ref=feat/claude-review&x='
+          #   -> contents/README.md?ref=feat/claude-review&x=?ref=main
+          #   -> returns the BRANCH's blob, not main's
+          #
+          # That reads the contract from the pull request's own head: the
+          # reviewer would apply rules the diff supplied, which is precisely
+          # the tamper this workflow was rebuilt to prevent, reintroduced
+          # through its own configuration. A `#` truncates, and `..` walks the
+          # path. So: a positive charset, and no dot-dot segments.
+          case "$GUIDELINES" in
+            ''|..|../*|*/../*|*/..)
+              echo "guidelines-file '${GUIDELINES}' contains a '..' segment; refusing." >&2
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$GUIDELINES" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+            echo "guidelines-file '${GUIDELINES}' is not a plain repo-relative path." >&2
+            echo "Allowed: letters, digits, dot, underscore, hyphen, slash. This input" >&2
+            echo "is interpolated into an API path, so anything else is refused." >&2
+            exit 1
+          fi
+
           dest="${RUNNER_TEMP}/review-guidelines.md"
 
           # Read from the API, not from local git refs: the checkout pins `ref`
