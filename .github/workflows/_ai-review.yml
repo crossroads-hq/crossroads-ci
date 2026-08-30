@@ -262,8 +262,15 @@ jobs:
               echo "to review under a contract path that does not name one." >&2
               exit 1
             fi
-            size="$(printf '%s' "$meta" | jq -r '.size')"
-            encoded="$(printf '%s' "$meta" | jq -r '.content')"
+            # `// 0` and `// ""`, because jq -r prints the STRING "null" for a
+            # missing field and both branches below then misread it: bash
+            # errors on `[ "null" -eq 0 ]`, and "null" is non-empty so the
+            # withheld-content branch never fires -- leaving base64 to decode
+            # the word null. Verified both ways. The coercion is inert on real
+            # responses: jq treats 0 and "" as truthy, so a genuine 0-byte file
+            # and a genuine empty content still pass through as themselves.
+            size="$(printf '%s' "$meta" | jq -r '.size // 0')"
+            encoded="$(printf '%s' "$meta" | jq -r '.content // ""')"
 
             # An empty `.content` has two unrelated causes and they must not
             # share a branch. A 0-byte file is a real committed contract that
