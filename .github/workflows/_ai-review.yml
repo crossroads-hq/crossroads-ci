@@ -280,8 +280,27 @@ jobs:
           # A pull request editing the contract is reviewed under the base
           # version AND told that it is doing so, because a change to the rules
           # is itself a change worth reviewing. Runs on every path above.
-          if gh api "repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename' \
-              | grep -qxF "${GUIDELINES}"; then
+          #
+          # Captured first, then tested. Writing this as
+          # `if gh api ... | grep -q; then` puts the API call inside a
+          # condition, where `set -e` deliberately does not abort -- so a 403,
+          # a rate limit or any 5xx reads as "the contract was not modified",
+          # and the reviewer is never told the rules it is applying are the
+          # thing under change. That is the third place in this file where an
+          # error path collapsed into an expected-outcome path; the other two
+          # were the workflow listing and the contract read.
+          #
+          # `--jq` per page is correct HERE, unlike the counting steps: this
+          # streams filenames, and the pages concatenate. It is aggregates like
+          # `| length` that break, by emitting one result per page.
+          if ! changed_files="$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate \
+              --jq '.[].filename')"; then
+            echo "Could not list this pull request's changed files, so whether the" >&2
+            echo "contract is under change is unknown; refusing to guess." >&2
+            exit 1
+          fi
+
+          if printf '%s\n' "$changed_files" | grep -qxF "${GUIDELINES}"; then
             echo "contract_changed=true" >> "$GITHUB_OUTPUT"
             echo "NOTE: this pull request modifies the contract itself." >> "$GITHUB_STEP_SUMMARY"
           else
