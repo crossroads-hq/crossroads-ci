@@ -298,6 +298,7 @@ jobs:
           comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq --arg since "$SINCE" \
             '[.[] | select((.user.login | test("claude"; "i")) and (.updated_at > $since))] | length')"
+          # shellcheck disable=SC2016
           reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
             --jq --arg since "$SINCE" \
             '[.[] | select((.user.login | test("claude"; "i")) and (.submitted_at > $since))] | length')"
