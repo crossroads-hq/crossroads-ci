@@ -77,15 +77,16 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The marker check and the marker write are not atomic: two deliveries for
-    # one head SHA (synchronize plus ready_for_review, a re-run) can both read
-    # "not yet reviewed" before either writes, and pay for two reviews. Serialise
-    # per head SHA so the second job reads the marker the first left. NOT
-    # cancel-in-progress: the second run must complete its check and skip, and a
-    # cancelled job would leave the gate reporting a cancellation.
+    # PR-keyed and cancelling, not SHA-keyed and serialising. Any dedup that
+    # reads shared state helps only AFTER a run finishes writing it; two runs
+    # in flight for one SHA both see "not reviewed" and both pay. Keying on the
+    # pull request and cancelling means a superseded push drops the run it
+    # superseded instead of queueing behind it -- which is the cost bound this
+    # workflow claims. A cancelled review is not a lost one: the SHA is never
+    # recorded, so the surviving run reviews the state that matters.
     concurrency:
-      group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
-      cancel-in-progress: false
+      group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - name: Detect reviewable changes
         id: changes
@@ -101,29 +102,40 @@ jobs:
       # already-reviewed state (reopen, ready_for_review after no change) skip
       # the model entirely. This is what keeps "review on push" from meaning
       # "review the same diff five times".
+      # Dedup off THIS JOB'S OWN completed runs, not off a comment.
+      #
+      # A marker comment is mintable by anything holding GITHUB_TOKEN --
+      # Dependabot, Copilot, or a one-shot job added by the very pull request
+      # under review, which on a `pull_request` event runs from the merge ref.
+      # Such a job can post the marker for its own head SHA before this step
+      # lists comments; dedup then skips, the job goes green, and Claude never
+      # runs. That is the tamper class this rebuild exists to close, so
+      # narrowing WHO may write the marker was never going to finish -- four
+      # rounds of review narrowed it from any commenter, to any bot, to one
+      # login, and it stayed mintable at every step.
+      #
+      # A check run is minted by Actions for a job that actually executed.
+      # Nothing holding a token can forge one. The record and the work become
+      # the same object: this job succeeds only if a review reached the pull
+      # request (see the confirm step below), so a prior success IS proof of a
+      # delivered review, and a prior failure leaves nothing to skip on.
       - name: Check whether this head SHA was already reviewed
         id: dedup
         if: steps.changes.outputs.reviewable == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Written by the Record step below under GITHUB_TOKEN, so it is
-          # always github-actions[bot]. Matching on body text alone let ANY
-          # commenter suppress a review, and `tail -n 1` meant their comment
-          # won; `.user.type == "Bot"` narrowed that to any installed App,
-          # which is still every bot in the repository. This is the author.
-          # Worst case if it ever differs: dedup stops matching and a SHA is
-          # reviewed twice -- it fails toward reviewing, not toward skipping.
-          reviewed="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .body' \
-            | sed -n 's/.*<!-- crossroads-ai-review:reviewed-sha=\([0-9a-f]*\) -->.*/\1/p' \
-            | tail -n 1)"
-          if [ "$reviewed" = "$HEAD_SHA" ]; then
-            echo "Head ${HEAD_SHA} already reviewed; skipping." >> "$GITHUB_STEP_SUMMARY"
+          # Reusable-workflow jobs report as "<caller job> / <callee job>", so
+          # the caller's naming is unknown here and only the suffix is fixed.
+          # The current run's own check is in_progress with a null conclusion
+          # and cannot match.
+          prior="$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs" --paginate \
+            --jq '[.check_runs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
+          if [ "${prior:-0}" -gt 0 ]; then
+            echo "Head ${HEAD_SHA} already has a successful Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -243,16 +255,29 @@ jobs:
         uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
-          use_sticky_comment: true
-          # No --add-dir. It was added when the contract reached the model by
-          # PATH, which sat outside Claude Code's working directory. The
-          # contract is now inlined into the prompt, so nothing reads that
-          # file and the grant bought only a wider readable surface -- the
-          # whole runner temp, and whatever unrelated artifacts it holds.
+          # This is AGENT mode: `prompt:` is set and track_progress defaults to
+          # false. In agent mode nothing is granted implicitly -- a prompt can
+          # ask for twenty inline comments and the model will have no tool able
+          # to leave one, finish successfully, and produce an empty pull
+          # request. That is precisely the outcome the retirement recorded as
+          # "zero reviews produced", and no amount of prompt wording fixes it.
+          #
+          # `use_sticky_comment` is deliberately NOT set: it is a known no-op in
+          # agent mode (anthropics/claude-code-action#1108), and leaving it on
+          # would imply a delivery path that does not exist.
+          #
+          # No --add-dir: the contract is inlined into the prompt, so nothing
+          # reads it from disk and the grant only widened the readable surface.
           claude_args: |
             --max-turns ${{ inputs.max-turns }}
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
           prompt: |
-            Review this pull request.
+            Review pull request #${{ github.event.pull_request.number }} in
+            the repository ${{ github.repository }}.
+
+            You have been granted tools that can leave inline comments and pull
+            request comments. Use them: findings that exist only in your final
+            message never reach the pull request and are lost.
 
             ${{ steps.contract.outputs.contract && 'The review contract is reproduced between the markers below. It was read from the BASE branch, not from this pull request, so it is the contract as it stands on the target branch regardless of what this diff does to it. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.' || 'The base branch ships no review contract, so the markers below are empty. Review for correctness, security, and consistency with the surrounding code.' }}
 
@@ -330,41 +355,6 @@ jobs:
             exit 1
           fi
           echo "Review reached the pull request (${total} artefact(s))." >> "$GITHUB_STEP_SUMMARY"
-
-      # The marker lands only after the action reports a conclusion, so a
-      # crashed or silently-skipped review does not mark the SHA as done --
-      # the next delivery retries it.
-      - name: Record reviewed SHA
-        if: >-
-          steps.changes.outputs.reviewable == 'true' &&
-          steps.dedup.outputs.skip == 'false' &&
-          steps.review.outputs.conclusion == 'success' &&
-          steps.posted.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          # NOTE for the next reviewer: the indentation on the second line
-          # below belongs to the YAML block scalar and is stripped before bash
-          # sees it. The parsed value carries zero leading spaces, so this does
-          # NOT render as a Markdown code block. Verified against the parsed
-          # scalar, not the raw file. Three reviews have flagged it; a printf
-          # rewrite was tried and reverted because the backticks inside a
-          # single-quoted format string trip shellcheck SC2016 through
-          # actionlint, trading a false positive for a real CI failure.
-          body="<!-- crossroads-ai-review:reviewed-sha=${HEAD_SHA} -->
-          Claude reviewed \`${HEAD_SHA}\`."
-          marker_id="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .id' \
-            | tail -n 1)"
-          if [ -n "$marker_id" ]; then
-            gh api --method PATCH "repos/${REPO}/issues/comments/${marker_id}" -f body="$body" --silent
-          else
-            gh api --method POST "repos/${REPO}/issues/${PR}/comments" -f body="$body" --silent
-          fi
 
       # An early exit with no conclusion and no stated reason fails, so green
       # means reviewed. The retired workflow reported green while reviewing
