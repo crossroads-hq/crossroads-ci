@@ -24,7 +24,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/verify-fleet.sh` | Prove the fleet still matches the profiles. Exit 1 on drift. |
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on a pin that does not resolve; `STRICT=1` also fails on any pin that is behind. |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
-| `actions/gate` | The aggregate-gate logic. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
+| `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
@@ -75,6 +75,21 @@ workflows because Actions access is set to `user` scope
 - **`full` requires a gate to exist.** Applying it to a repository that never
   reports the check blocks every PR permanently — `bypass_actors` is empty and
   administrators are enforced. That is what `minimal` is for.
+- **A pull request can rewrite the gate that judges it.** On a `pull_request`
+  event the workflow definition comes from the merge ref, so a PR editing
+  `ci.yml` changes its own `results` and `needs` and still reports
+  `PR Validation` green. Not closable from inside CI. It is why a diff
+  touching `.github/` needs human eyes, and why shared logic lives in this
+  repository behind a SHA pin, where a consumer's pull request cannot reach
+  it — the rules below reduce the blast radius, they do not remove it.
+- **Excusing a skip means requiring its filter job.** A job skips when a job
+  it `needs` fails, so a path-filter job left out of `results` can fail, skip
+  every leg it feeds, and let the gate pass on excused skips alone. List the
+  filter job in `results` and keep it out of `allow-skipped`.
+- **The secret scan is not path-filtered.** Gating `_supply-chain.yml` on
+  changed paths skips gitleaks along with everything else, and a credential
+  pasted into a README is the ordinary case. Filter the lockfile legs with the
+  workflow's own inputs instead.
 - **Changes to `governance/` are governance decisions**, reviewed as such.
   Exceptions are temporary, owned, and carry an expiry — see
   `repository-protection-policy.yml`.

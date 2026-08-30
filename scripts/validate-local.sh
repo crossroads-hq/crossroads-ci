@@ -6,7 +6,7 @@
 #
 #   scripts/validate-local.sh
 #
-# Required tools: bash, shellcheck, jq, ruby (with psych/yaml).
+# Required tools: bash, shellcheck, jq, ruby (with psych/yaml), node.
 # Optional tools: docker (actionlint image), pipx + zizmor.
 
 set -euo pipefail
@@ -24,6 +24,7 @@ require bash
 require shellcheck
 require jq
 require ruby
+require node
 
 echo "Shell syntax"
 n=0
@@ -52,7 +53,15 @@ echo "  all fleet entries render"
 
 echo "Composite actions parse"
 ruby -ryaml -e 'ARGV.each { |f| YAML.safe_load(File.read(f)) }' actions/*/action.yml
-echo "  action.yml files parse"
+# One file per invocation -- see the matching note in ci.yml: `node --check`
+# parses only its first argument and exits 0 on a broken second file.
+n=0
+for f in actions/*/*.js; do node --check "$f"; n=$((n + 1)); done
+echo "  action.yml files parse; ${n} action scripts parse"
+
+echo "Gate logic tests"
+node --test actions/gate/check.test.js
+echo "  gate logic passes"
 
 if command -v docker >/dev/null; then
   echo "actionlint (docker)"
