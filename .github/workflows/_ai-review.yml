@@ -208,8 +208,15 @@ jobs:
             exit 1
           fi
 
+          # Distinguish a 404 from every other failure. `2>/dev/null` on this
+          # call made a 403, a rate limit or any 5xx read as "the file is not
+          # there", dropping an existing contract while the summary said it
+          # simply did not exist -- silently voiding the base-rules guarantee.
+          # Same defect, same shape, as the one fixed in verify-pins.sh: an
+          # error path collapsed into an expected-absence path.
+          err="$(mktemp)"
           if encoded="$(gh api "repos/${REPO}/contents/${GUIDELINES}?ref=${BASE_REF}" \
-              --jq '.content' 2>/dev/null)"; then
+              --jq '.content' 2>"$err")"; then
             # `.content` comes back EMPTY for a file over 1 MB. Treating that as
             # "no contract" would silently drop the guarantee, so it is fatal.
             if [ -z "$encoded" ]; then
@@ -226,11 +233,18 @@ jobs:
               printf '%s\n' "$(cat "$dest")"
               echo "${delim}"
             } >> "$GITHUB_OUTPUT"
-          else
+          elif grep -q 'HTTP 404' "$err"; then
             echo "contract=" >> "$GITHUB_OUTPUT"
             echo "contract_body=" >> "$GITHUB_OUTPUT"
             echo "No ${GUIDELINES} on ${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Could not read '${GUIDELINES}' on ${BASE_REF}. This is NOT a" >&2
+            echo "missing file, so it is not the general-brief fallback:" >&2
+            sed 's/^/    /' "$err" >&2
+            rm -f "$err"
+            exit 1
           fi
+          rm -f "$err"
 
           # A pull request editing the contract is reviewed under the base
           # version AND told that it is doing so, because a change to the
