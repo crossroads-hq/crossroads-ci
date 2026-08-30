@@ -73,6 +73,13 @@ workflows because Actions access is set to `user` scope
 - **`full` requires a gate to exist.** Applying it to a repository that never
   reports the check blocks every PR permanently — `bypass_actors` is empty and
   administrators are enforced. That is what `minimal` is for.
+- **A pull request can rewrite the gate that judges it.** On a `pull_request`
+  event the workflow definition comes from the merge ref, so a PR editing
+  `ci.yml` changes its own `results` and `needs` and still reports
+  `PR Validation` green. Not closable from inside CI. It is why a diff
+  touching `.github/` needs human eyes, and why shared logic lives in this
+  repository behind a SHA pin, where a consumer's pull request cannot reach
+  it — the rules below reduce the blast radius, they do not remove it.
 - **Excusing a skip means requiring its filter job.** A job skips when a job
   it `needs` fails, so a path-filter job left out of `results` can fail, skip
   every leg it feeds, and let the gate pass on excused skips alone. List the
