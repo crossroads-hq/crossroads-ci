@@ -1,0 +1,226 @@
+# Reusable: Claude review for a pull request, deduplicated by head SHA.
+#
+# Supersedes the _ai-review.yml retired 2026-08-24. That retirement recorded
+# "zero reviews produced across the comparison window"; the cause, in the same
+# commit message, was that "every candidate PR tripped the action's
+# anti-tampering guard or was documentation-only". Checked against the API:
+# no Claude review was ever posted on crossroads-ui, across 100 pull requests.
+# The reviewer was never handed a diff. That is not a verdict on the reviewer.
+#
+# The old guard skipped any PR touching .github/workflows/. In a fleet whose
+# main working repository is a CI control plane, that is most pull requests --
+# and it skipped review of exactly the changes that most warrant one. The same
+# inversion `actions/detect-reviewable` was written to fix, reintroduced one
+# workflow later.
+#
+# The concern behind it was real. On a `pull_request` event for a same-repo
+# branch, the workflow definition comes from the PR's merge ref, so a pull
+# request can edit CI and have its edit run with secrets. Two surfaces:
+#
+#   1. This workflow's own logic. Solved by living here: a consumer's pull
+#      request cannot alter a reusable workflow pinned to a SHA in this
+#      repository.
+#   2. The review contract, which lives in the CONSUMER repository and is
+#      checked out from the PR head. This one was never addressed -- the guard
+#      dodged it by not reviewing at all.
+#
+# So the contract is read from the BASE ref instead. A pull request that
+# rewrites the rules is reviewed under the rules as they stand on the base
+# branch, and the rewrite is called out to the reviewer as a change to judge.
+# Review coverage and tamper-resistance stop being a trade.
+#
+# NOT a required check by design: a reviewer that can block a merge is a
+# reviewer that gets worked around. The gate should not list this job.
+name: AI review
+
+on:
+  workflow_call:
+    inputs:
+      guidelines-file:
+        description: >-
+          Repo-relative path to the review contract. Read from the base ref,
+          never from the pull request. Optional -- without it the reviewer
+          falls back to a general-purpose brief, so a repository with no
+          contract still gets reviewed.
+        type: string
+        required: false
+        default: .github/review-guidelines.md
+      max-turns:
+        description: Claude Code turn budget for one review.
+        type: string
+        required: false
+        default: "25"
+    secrets:
+      claude-code-oauth-token:
+        description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Claude review
+    # The caller gates on its own conditions (draft, labels, site-only); this
+    # workflow enforces the ones it can see. The fork check is load-bearing:
+    # secrets must never reach a workflow definition a stranger controls.
+    if: >-
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.title, '[skip-ai-review]') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+      # The action exchanges the workflow's OIDC token for a Claude App token
+      # so comments are attributed to claude[bot]. Safe under the fork guard.
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Detect reviewable changes
+        id: changes
+        # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
+        # cross-repo, a relative path resolves against the CALLER's checkout,
+        # which at this point in the job does not exist.
+        uses: tsviser/crossroads-ci/actions/detect-reviewable@932432038147d4f19d5c996e9985d8dcc87bf4f6 # main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # One review per head SHA. The marker comment survives pushes, so a
+      # `synchronize` for a new commit reviews it, while re-deliveries of an
+      # already-reviewed state (reopen, ready_for_review after no change) skip
+      # the model entirely. This is what keeps "review on push" from meaning
+      # "review the same diff five times".
+      - name: Check whether this head SHA was already reviewed
+        id: dedup
+        if: steps.changes.outputs.reviewable == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          reviewed="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq '.[].body' \
+            | sed -n 's/.*<!-- crossroads-ai-review:reviewed-sha=\([0-9a-f]*\) -->.*/\1/p' \
+            | tail -n 1)"
+          if [ "$reviewed" = "$HEAD_SHA" ]; then
+            echo "Head ${HEAD_SHA} already reviewed; skipping." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The contract, resolved from the base branch and written OUTSIDE the
+      # working tree. Outside matters: dropping it into the checkout would put
+      # it in the diff the reviewer is judging.
+      - name: Resolve the review contract from the base ref
+        id: contract
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GUIDELINES: ${{ inputs.guidelines-file }}
+        run: |
+          set -euo pipefail
+          dest="${RUNNER_TEMP}/review-guidelines.md"
+          git fetch --no-tags --quiet origin "${BASE_REF}"
+
+          if git show "origin/${BASE_REF}:${GUIDELINES}" > "$dest" 2>/dev/null; then
+            echo "contract=${dest}" >> "$GITHUB_OUTPUT"
+            echo "Contract: ${GUIDELINES} as of origin/${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "contract=" >> "$GITHUB_OUTPUT"
+            echo "No ${GUIDELINES} on origin/${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # A pull request editing the contract is reviewed under the base
+          # version AND told that it is doing so, because a change to the
+          # rules is itself a change worth reviewing. The old guard's answer
+          # was to review neither the rules nor the code.
+          if gh api "repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename' \
+              | grep -qxF "${GUIDELINES}"; then
+            echo "contract_changed=true" >> "$GITHUB_OUTPUT"
+            echo "NOTE: this pull request modifies the contract itself." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "contract_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Claude review
+        id: review
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
+          use_sticky_comment: true
+          claude_args: |
+            --max-turns ${{ inputs.max-turns }}
+          prompt: |
+            Review this pull request.
+
+            ${{ steps.contract.outputs.contract && format('The review contract is the file at {0}. It was read from the base branch, NOT from this pull request. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.', steps.contract.outputs.contract) || 'This repository ships no review contract. Review for correctness, security, and consistency with the surrounding code.' }}
+
+            ${{ steps.contract.outputs.contract_changed == 'true' && 'This pull request MODIFIES the review contract. You are deliberately reviewing it under the base version. Treat the change to the contract as a change under review: say plainly what it would loosen or tighten.' || '' }}
+
+            You are running inside the checkout, so open the files you need
+            rather than inferring from the diff.
+
+            Report only actionable findings supported by changed lines,
+            highest severity first, capped at 20 inline comments. Skip style
+            nits. Do not approve or request changes through the review API.
+
+      # The marker lands only after the action reports a conclusion, so a
+      # crashed or silently-skipped review does not mark the SHA as done --
+      # the next delivery retries it.
+      - name: Record reviewed SHA
+        if: >-
+          steps.changes.outputs.reviewable == 'true' &&
+          steps.dedup.outputs.skip == 'false' &&
+          steps.review.outputs.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          body="<!-- crossroads-ai-review:reviewed-sha=${HEAD_SHA} -->
+          Claude reviewed \`${HEAD_SHA}\`."
+          marker_id="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq '.[] | select(.body | contains("crossroads-ai-review:reviewed-sha=")) | .id' \
+            | tail -n 1)"
+          if [ -n "$marker_id" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${marker_id}" -f body="$body" --silent
+          else
+            gh api --method POST "repos/${REPO}/issues/${PR}/comments" -f body="$body" --silent
+          fi
+
+      # An early exit with no conclusion and no stated reason fails, so green
+      # means reviewed. The retired workflow reported green while reviewing
+      # nothing for a month; silence is the failure mode to catch.
+      - name: Report review outcome
+        if: ${{ !cancelled() && steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' }}
+        env:
+          CONCLUSION: ${{ steps.review.outputs.conclusion }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CONCLUSION" ]; then
+            echo "The reviewer produced no conclusion; treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
+          [ "$CONCLUSION" = "success" ] || {
+            echo "The reviewer reported a failure; treat this PR as unreviewed." >&2
+            exit 1
+          }

@@ -27,7 +27,7 @@ Here, the JSON profiles are the only copy.
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
-| ~~`.github/workflows/_ai-review.yml`~~ | Retired 2026-08-24: the Claude reviewer produced zero reviews across its comparison window; Copilot-on-push (ruleset rule) and the OpenAI diff reviewer carry AI review. |
+| `.github/workflows/_ai-review.yml` | Reusable: Claude review per head SHA, on every push. Reads the review contract from the **base** ref, so a PR cannot rewrite the rules it is judged by — which is what lets it review workflow changes instead of skipping them. Retired 2026-08-24 and rebuilt: the recorded "zero reviews" was the old anti-tampering guard skipping every candidate, not a verdict on the reviewer. |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
 
 ## Usage
@@ -46,6 +46,11 @@ jobs:
   supply-chain:
     uses: tsviser/crossroads-ci/.github/workflows/_supply-chain.yml@main
     with: { npm-audit: true }
+
+  ai-review:
+    uses: tsviser/crossroads-ci/.github/workflows/_ai-review.yml@main
+    secrets:
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   gate:
     name: PR Validation            # the name IS the contract — never rename
