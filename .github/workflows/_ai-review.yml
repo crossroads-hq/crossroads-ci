@@ -133,6 +133,15 @@ jobs:
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The PR HEAD, not the default merge ref. Dedup is keyed on
+          # head.sha, and the merge ref's content changes when the BASE moves
+          # while head.sha stays put -- so the default would review one tree
+          # and record a different one as reviewed, and a base change would
+          # never be re-reviewed. Reviewing head keeps the two describing the
+          # same thing; the fleet's rulesets set
+          # strict_required_status_checks_policy, so a branch is current with
+          # base by the time it can merge anyway.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -291,17 +300,23 @@ jobs:
           SINCE: ${{ steps.stamp.outputs.started }}
         run: |
           set -euo pipefail
+          # Bot accounts only. Matching the login alone let any HUMAN whose
+          # username contains "claude" satisfy this check by commenting after
+          # the job started -- which would record the SHA as reviewed and
+          # suppress every later review of it. An anti-spoof guard that is
+          # itself spoofable is worse than none, because it reads as covered.
+          #
           # `$since` below is a jq variable bound by --arg, not a shell
           # expansion, so single quotes are correct. shellcheck cannot tell the
           # two apart and actionlint fails the run on its advice.
           # shellcheck disable=SC2016
           comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq --arg since "$SINCE" \
-            '[.[] | select((.user.login | test("claude"; "i")) and (.updated_at > $since))] | length')"
+            '[.[] | select(.user.type == "Bot" and (.user.login | test("claude"; "i")) and (.updated_at > $since))] | length')"
           # shellcheck disable=SC2016
           reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
             --jq --arg since "$SINCE" \
-            '[.[] | select((.user.login | test("claude"; "i")) and (.submitted_at > $since))] | length')"
+            '[.[] | select(.user.type == "Bot" and (.user.login | test("claude"; "i")) and (.submitted_at > $since))] | length')"
           total=$((comments + reviews))
           if [ "$total" -eq 0 ]; then
             {

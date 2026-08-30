@@ -48,11 +48,13 @@ jobs:
     with: { npm-audit: true }
 
   # Requires the caller workflow to fire on `synchronize`, or the reviewer
-  # only ever sees a pull request's opening state:
+  # only ever sees a pull request's opening state. GitHub's DEFAULT types are
+  # [opened, synchronize, reopened] — synchronize is already there, so a caller
+  # with no `types:` needs no change. `ready_for_review` is NOT a default: add
+  # the explicit list if a draft being marked ready should trigger a review.
   #   on:
   #     pull_request:
   #       types: [opened, synchronize, reopened, ready_for_review]
-  # A caller with no `types:` gets those by default and needs no change.
   ai-review:
     # Pin a SHA, not @main. The tamper-resistance argument for this workflow
     # rests on a consumer's pull request being unable to move the ref it
