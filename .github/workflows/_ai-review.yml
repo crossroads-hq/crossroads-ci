@@ -204,7 +204,26 @@ jobs:
           # "from the base branch, never from this pull request" guarantee
           # without depending on what checkout left on disk, and it
           # authenticates, so it works on private consumers.
-          if ! gh api "repos/${REPO}/commits/${BASE_REF}" --jq '.sha' >/dev/null 2>&1; then
+          # BASE_REF is percent-encoded before it goes into a PATH segment.
+          # Not because a slash cannot be resolved -- `commits/feat/my-branch`
+          # resolves fine -- but because /commits/{ref} has real sub-routes,
+          # and a branch whose name ends in one silently reaches a different
+          # endpoint. Measured against this repository:
+          #
+          #   commits/main/comments    -> the comments sub-route, an ARRAY, so
+          #                               `.sha` errors and a branch that
+          #                               EXISTS is reported unresolvable
+          #   commits/main/check-runs  -> the check-runs sub-route, no .sha
+          #   commits/main/status      -> the status sub-route, which DOES
+          #                               carry a .sha, so the probe passes
+          #                               while having asked a different
+          #                               question entirely
+          #
+          # Encoded, all three correctly report "no such ref", and a real
+          # slash branch still resolves. The query parameter below needs no
+          # such treatment -- it is not a path segment.
+          BASE_REF_PATH="$(jq -rn --arg s "$BASE_REF" '$s|@uri')"
+          if ! gh api "repos/${REPO}/commits/${BASE_REF_PATH}" --jq '.sha' >/dev/null 2>&1; then
             echo "Cannot resolve base ref '${BASE_REF}'; refusing to review without" >&2
             echo "establishing whether a contract exists on the base branch." >&2
             exit 1
