@@ -1,0 +1,531 @@
+# Reusable: Claude review for a pull request, deduplicated by head SHA.
+#
+# Supersedes the _ai-review.yml retired 2026-08-24. That retirement recorded
+# "zero reviews produced across the comparison window"; the cause, in the same
+# commit message, was that "every candidate PR tripped the action's
+# anti-tampering guard or was documentation-only". Checked against the API:
+# no Claude review was ever posted on crossroads-ui, across 100 pull requests.
+# The reviewer was never handed a diff. That is not a verdict on the reviewer.
+#
+# The old guard skipped any PR touching .github/workflows/. In a fleet whose
+# main working repository is a CI control plane, that is most pull requests --
+# and it skipped review of exactly the changes that most warrant one. The same
+# inversion `actions/detect-reviewable` was written to fix, reintroduced one
+# workflow later.
+#
+# The concern behind it was real. On a `pull_request` event for a same-repo
+# branch, the workflow definition comes from the PR's merge ref, so a pull
+# request can edit CI and have its edit run with secrets. Two surfaces:
+#
+#   1. This workflow's own logic. Solved by living here: a consumer's pull
+#      request cannot alter a reusable workflow pinned to a SHA in this
+#      repository.
+#   2. The review contract, which lives in the CONSUMER repository and is
+#      checked out from the PR head. This one was never addressed -- the guard
+#      dodged it by not reviewing at all.
+#
+# So the contract is read from the BASE ref instead. A pull request that
+# rewrites the rules is reviewed under the rules as they stand on the base
+# branch, and the rewrite is called out to the reviewer as a change to judge.
+# Review coverage and tamper-resistance stop being a trade.
+#
+# NOT a required check by design: a reviewer that can block a merge is a
+# reviewer that gets worked around. The gate should not list this job.
+name: AI review
+
+on:
+  workflow_call:
+    inputs:
+      guidelines-file:
+        description: >-
+          Repo-relative path to the review contract. Read from the base ref,
+          never from the pull request. Optional -- without it the reviewer
+          falls back to a general-purpose brief, so a repository with no
+          contract still gets reviewed.
+        type: string
+        required: false
+        default: .github/review-guidelines.md
+      max-turns:
+        description: Claude Code turn budget for one review.
+        type: number
+        required: false
+        default: 25
+    secrets:
+      claude-code-oauth-token:
+        description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Claude review
+    # The caller gates on its own conditions (draft, labels, site-only); this
+    # workflow enforces the ones it can see. The fork check is load-bearing:
+    # secrets must never reach a workflow definition a stranger controls.
+    if: >-
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.title, '[skip-ai-review]') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+      # Dedup reads /actions/runs and /actions/runs/{id}/jobs. It used to read
+      # /commits/{sha}/check-runs, which needed `checks: read`; moving to the
+      # Actions API to scope dedup to the caller's own workflow file changed
+      # the scope with it, and the grant did not follow. Job-level permissions
+      # are a whitelist -- anything unlisted is `none`, never inherited -- so
+      # the mismatch would 403 and take the job with it.
+      actions: read
+      # The action exchanges the workflow's OIDC token for a Claude App token
+      # so comments are attributed to claude[bot]. Safe under the fork guard.
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # PR-keyed and cancelling, not SHA-keyed and serialising. Any dedup that
+    # reads shared state helps only AFTER a run finishes writing it; two runs
+    # in flight for one SHA both see "not reviewed" and both pay. Keying on the
+    # pull request and cancelling means a superseded push drops the run it
+    # superseded instead of queueing behind it -- which is the cost bound this
+    # workflow claims. A cancelled review is not a lost one: the SHA is never
+    # recorded, so the surviving run reviews the state that matters.
+    concurrency:
+      group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Detect reviewable changes
+        id: changes
+        # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
+        # cross-repo, a relative path resolves against the CALLER's checkout,
+        # which at this point in the job does not exist.
+        uses: tsviser/crossroads-ci/actions/detect-reviewable@932432038147d4f19d5c996e9985d8dcc87bf4f6 # main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # One review per head SHA. The marker comment survives pushes, so a
+      # `synchronize` for a new commit reviews it, while re-deliveries of an
+      # already-reviewed state (reopen, ready_for_review after no change) skip
+      # the model entirely. This is what keeps "review on push" from meaning
+      # "review the same diff five times".
+      # Dedup off THIS JOB'S OWN completed runs, not off a comment.
+      #
+      # A marker comment is mintable by anything holding GITHUB_TOKEN --
+      # Dependabot, Copilot, or a one-shot job added by the very pull request
+      # under review, which on a `pull_request` event runs from the merge ref.
+      # Such a job can post the marker for its own head SHA before this step
+      # lists comments; dedup then skips, the job goes green, and Claude never
+      # runs. That is the tamper class this rebuild exists to close, so
+      # narrowing WHO may write the marker was never going to finish -- four
+      # rounds of review narrowed it from any commenter, to any bot, to one
+      # login, and it stayed mintable at every step.
+      #
+      # A check run is minted by Actions for a job that actually executed.
+      # Nothing holding a token can forge one. The record and the work become
+      # the same object: this job succeeds only if a review reached the pull
+      # request (see the confirm step below), so a prior success IS proof of a
+      # delivered review, and a prior failure leaves nothing to skip on.
+      - name: Check whether this head SHA was already reviewed
+        id: dedup
+        if: steps.changes.outputs.reviewable == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          # Scoped to the CALLER'S OWN WORKFLOW FILE, not to any check run that
+          # happens to carry this job's name. A check run records no workflow
+          # path -- measured: name and app only -- so matching on the name
+          # alone accepted a job called "Claude review" anywhere in the
+          # repository, including one a pull request adds in a workflow of its
+          # own. It could succeed in seconds and the real review would skip:
+          # the same tamper class as the comment marker this replaced, one
+          # layer further in.
+          #
+          # A workflow RUN does carry `.path`. Filtering this head SHA's runs
+          # to the caller's own workflow file, then reading that run's jobs,
+          # leaves one way to forge a match -- edit the caller workflow itself
+          # -- which is the residual already documented in the README, not a
+          # separate hole.
+          #
+          # The current run is in this list; its own job is in_progress with a
+          # null conclusion and cannot match.
+          wf_path="${WORKFLOW_REF%%@*}"   # owner/repo/.github/workflows/x.yml
+          wf_path="${wf_path#*/}"         # repo/.github/workflows/x.yml
+          wf_path="${wf_path#*/}"         # .github/workflows/x.yml
+
+          prior=0
+          for rid in $(gh api "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+              --paginate --slurp \
+              | jq -r --arg p "$wf_path" '.[].workflow_runs[] | select(.path == $p) | .id'); do
+            n="$(gh api "repos/${REPO}/actions/runs/${rid}/jobs" --paginate --slurp \
+              | jq '[.[].jobs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
+            prior=$((prior + n))
+          done
+
+          if [ "${prior:-0}" -gt 0 ]; then
+            echo "Head ${HEAD_SHA} already has a successful Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR HEAD, not the default merge ref. Dedup is keyed on
+          # head.sha, and the merge ref's content changes when the BASE moves
+          # while head.sha stays put -- so the default would review one tree
+          # and record a different one as reviewed, and a base change would
+          # never be re-reviewed. Reviewing head keeps the two describing the
+          # same thing; the fleet's rulesets set
+          # strict_required_status_checks_policy, so a branch is current with
+          # base by the time it can merge anyway.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The contract, resolved from the base branch and written OUTSIDE the
+      # working tree. Outside matters: dropping it into the checkout would put
+      # it in the diff the reviewer is judging.
+      - name: Resolve the review contract from the base ref
+        id: contract
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GUIDELINES: ${{ inputs.guidelines-file }}
+        run: |
+          set -euo pipefail
+
+          # Normalise once. `guidelines-file` is documented repo-relative, but
+          # a caller may reasonably write `./.github/review-guidelines.md`.
+          # That breaks BOTH uses below in ways that fail quietly: the contents
+          # API does not resolve `./path`, and the pull request file list
+          # carries no `./`, so the contract_changed grep would miss a PR that
+          # edits the contract -- the reviewer would then not be told the rules
+          # it is applying are the very thing under change.
+          while :; do
+            case "$GUIDELINES" in
+              ./*) GUIDELINES="${GUIDELINES#./}" ;;
+              /*)  GUIDELINES="${GUIDELINES#/}" ;;
+              *)   break ;;
+            esac
+          done
+
+          # Validate before it reaches a URL. `guidelines-file` is caller
+          # controlled, and on a pull_request the caller workflow comes from
+          # the merge ref -- so the pull request under review can set it. It is
+          # then interpolated into `contents/${GUIDELINES}?ref=${BASE_REF}`,
+          # where a `?` starts a query of the attacker's choosing and the FIRST
+          # ref wins. Measured against this repository:
+          #
+          #   guidelines-file: 'README.md?ref=feat/claude-review&x='
+          #   -> contents/README.md?ref=feat/claude-review&x=?ref=main
+          #   -> returns the BRANCH's blob, not main's
+          #
+          # That reads the contract from the pull request's own head: the
+          # reviewer would apply rules the diff supplied, which is precisely
+          # the tamper this workflow was rebuilt to prevent, reintroduced
+          # through its own configuration. A `#` truncates, and `..` walks the
+          # path. So: a positive charset, and no dot-dot segments.
+          case "$GUIDELINES" in
+            ''|..|../*|*/../*|*/..)
+              echo "guidelines-file '${GUIDELINES}' contains a '..' segment; refusing." >&2
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$GUIDELINES" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+            echo "guidelines-file '${GUIDELINES}' is not a plain repo-relative path." >&2
+            echo "Allowed: letters, digits, dot, underscore, hyphen, slash. This input" >&2
+            echo "is interpolated into an API path, so anything else is refused." >&2
+            exit 1
+          fi
+
+          dest="${RUNNER_TEMP}/review-guidelines.md"
+
+          # Read from the API, not from local git refs: the checkout pins `ref`
+          # to the head SHA and a SHA checkout does not guarantee
+          # refs/remotes/origin/* is populated. `?ref=<base>` enforces the same
+          # "from the base branch, never from this pull request" guarantee
+          # without depending on what checkout left on disk, and it
+          # authenticates, so it works on private consumers.
+          # BASE_REF is percent-encoded before it goes into a PATH segment.
+          # Not because a slash cannot be resolved -- `commits/feat/my-branch`
+          # resolves fine -- but because /commits/{ref} has real sub-routes,
+          # and a branch whose name ends in one silently reaches a different
+          # endpoint. Measured against this repository:
+          #
+          #   commits/main/comments    -> the comments sub-route, an ARRAY, so
+          #                               `.sha` errors and a branch that
+          #                               EXISTS is reported unresolvable
+          #   commits/main/check-runs  -> the check-runs sub-route, no .sha
+          #   commits/main/status      -> the status sub-route, which DOES
+          #                               carry a .sha, so the probe passes
+          #                               while having asked a different
+          #                               question entirely
+          #
+          # Encoded, all three correctly report "no such ref", and a real
+          # slash branch still resolves. The query parameter below needs no
+          # such treatment -- it is not a path segment.
+          BASE_REF_PATH="$(jq -rn --arg s "$BASE_REF" '$s|@uri')"
+          if ! gh api "repos/${REPO}/commits/${BASE_REF_PATH}" --jq '.sha' >/dev/null 2>&1; then
+            echo "Cannot resolve base ref '${BASE_REF}'; refusing to review without" >&2
+            echo "establishing whether a contract exists on the base branch." >&2
+            exit 1
+          fi
+
+          # Exactly one of these becomes true, and every path that is not a
+          # real usable contract must still reach the contract_changed
+          # detection at the end -- so no branch here exits early on success.
+          have_contract=false
+          err="$(mktemp)"
+
+          if meta="$(gh api "repos/${REPO}/contents/${GUIDELINES}?ref=${BASE_REF}" 2>"$err")"; then
+            kind="$(printf '%s' "$meta" | jq -r 'if type == "array" then "directory" else .type end')"
+            if [ "$kind" != "file" ]; then
+              echo "'${GUIDELINES}' on ${BASE_REF} is a ${kind}, not a file; refusing" >&2
+              echo "to review under a contract path that does not name one." >&2
+              exit 1
+            fi
+            # `// 0` and `// ""`, because jq -r prints the STRING "null" for a
+            # missing field and both branches below then misread it: bash
+            # errors on `[ "null" -eq 0 ]`, and "null" is non-empty so the
+            # withheld-content branch never fires -- leaving base64 to decode
+            # the word null. Verified both ways. The coercion is inert on real
+            # responses: jq treats 0 and "" as truthy, so a genuine 0-byte file
+            # and a genuine empty content still pass through as themselves.
+            size="$(printf '%s' "$meta" | jq -r '.size // 0')"
+            encoded="$(printf '%s' "$meta" | jq -r '.content // ""')"
+
+            # An empty `.content` has two unrelated causes and they must not
+            # share a branch. A 0-byte file is a real committed contract that
+            # carries no rules: unhelpful, not broken, and failing the job for
+            # it would break a repository for committing an empty file. A file
+            # WITH bytes whose content came back empty is the API declining to
+            # inline it past 1 MB, which would silently drop a real contract,
+            # so that stays fatal. `.size` is what separates them.
+            if [ "${size:-0}" -eq 0 ]; then
+              echo "${GUIDELINES} on ${BASE_REF} is empty; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+            elif [ -z "$encoded" ]; then
+              echo "Contract '${GUIDELINES}' on ${BASE_REF} is ${size} bytes but the" >&2
+              echo "API returned no content (over the 1 MB inline limit); refusing." >&2
+              exit 1
+            else
+              printf '%s' "$encoded" | base64 -d > "$dest"
+              have_contract=true
+              echo "Contract: ${GUIDELINES} as of ${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          elif grep -q 'HTTP 404' "$err"; then
+            # Absent on base. The one legitimate fallback: distinguishing it
+            # from a 403, a rate limit or any 5xx is the whole point of
+            # capturing stderr rather than discarding it.
+            echo "No ${GUIDELINES} on ${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Could not read '${GUIDELINES}' on ${BASE_REF}. This is NOT a" >&2
+            echo "missing file, so it is not the general-brief fallback:" >&2
+            sed 's/^/    /' "$err" >&2
+            exit 1
+          fi
+          rm -f "$err"
+
+          if [ "$have_contract" = true ]; then
+            echo "contract=${dest}" >> "$GITHUB_OUTPUT"
+            # Carried INLINE into the prompt, never by path: Claude Code grants
+            # file access to its working directory, and this file sits outside
+            # the checkout so it cannot join the diff under review -- which also
+            # put it out of the model's reach. Passing the bytes removes the
+            # question. Random per-run delimiter, because a fixed one needed a
+            # collision guard whose fallback emitted an empty body, which the
+            # prompt reads as a hard stop.
+            delim="CROSSROADS_CONTRACT_EOF_$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+            {
+              echo "contract_body<<${delim}"
+              printf '%s\n' "$(cat "$dest")"
+              echo "${delim}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "contract=" >> "$GITHUB_OUTPUT"
+            echo "contract_body=" >> "$GITHUB_OUTPUT"
+          fi
+
+          # A pull request editing the contract is reviewed under the base
+          # version AND told that it is doing so, because a change to the rules
+          # is itself a change worth reviewing. Runs on every path above.
+          #
+          # Captured first, then tested. Writing this as
+          # `if gh api ... | grep -q; then` puts the API call inside a
+          # condition, where `set -e` deliberately does not abort -- so a 403,
+          # a rate limit or any 5xx reads as "the contract was not modified",
+          # and the reviewer is never told the rules it is applying are the
+          # thing under change. That is the third place in this file where an
+          # error path collapsed into an expected-outcome path; the other two
+          # were the workflow listing and the contract read.
+          #
+          # `--jq` per page is correct HERE, unlike the counting steps: this
+          # streams filenames, and the pages concatenate. It is aggregates like
+          # `| length` that break, by emitting one result per page.
+          if ! changed_files="$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate \
+              --jq '.[].filename')"; then
+            echo "Could not list this pull request's changed files, so whether the" >&2
+            echo "contract is under change is unknown; refusing to guess." >&2
+            exit 1
+          fi
+
+          if printf '%s\n' "$changed_files" | grep -qxF "${GUIDELINES}"; then
+            echo "contract_changed=true" >> "$GITHUB_OUTPUT"
+            echo "NOTE: this pull request modifies the contract itself." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "contract_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mark the time before the model runs
+        id: stamp
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        run: echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Claude review
+        id: review
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
+          # This is AGENT mode: `prompt:` is set and track_progress defaults to
+          # false. In agent mode nothing is granted implicitly -- a prompt can
+          # ask for twenty inline comments and the model will have no tool able
+          # to leave one, finish successfully, and produce an empty pull
+          # request. That is precisely the outcome the retirement recorded as
+          # "zero reviews produced", and no amount of prompt wording fixes it.
+          #
+          # `use_sticky_comment` is deliberately NOT set: it is a known no-op in
+          # agent mode (anthropics/claude-code-action#1108), and leaving it on
+          # would imply a delivery path that does not exist.
+          #
+          # No --add-dir: the contract is inlined into the prompt, so nothing
+          # reads it from disk and the grant only widened the readable surface.
+          claude_args: |
+            --max-turns ${{ inputs.max-turns }}
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in
+            the repository ${{ github.repository }}.
+
+            You have been granted tools that can leave inline comments and pull
+            request comments. Use them: findings that exist only in your final
+            message never reach the pull request and are lost.
+
+            ${{ steps.contract.outputs.contract && 'The review contract is reproduced between the markers below. It was read from the BASE branch, not from this pull request, so it is the contract as it stands on the target branch regardless of what this diff does to it. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.' || 'The base branch ships no review contract, so the markers below are empty. Review for correctness, security, and consistency with the surrounding code.' }}
+
+            --- BEGIN REVIEW CONTRACT (from the base branch) ---
+            ${{ steps.contract.outputs.contract_body }}
+            --- END REVIEW CONTRACT ---
+
+            ${{ (steps.contract.outputs.contract_changed == 'true' && steps.contract.outputs.contract) && 'This pull request MODIFIES the review contract. You are deliberately reviewing it under the base version above. Treat the change to the contract as a change under review: say plainly what it would loosen or tighten.' || '' }}
+
+            ${{ (steps.contract.outputs.contract_changed == 'true' && !steps.contract.outputs.contract) && 'This pull request ADDS a review contract where the base branch has none. There is no base version to apply, so review the code under the general brief above, and judge the proposed contract itself on its merits.' || '' }}
+
+            You are running inside the checkout, so open the files you need
+            rather than inferring from the diff.
+
+            If the contract markers above are empty while the text says a
+            contract IS reproduced between them, stop and say so instead of
+            reviewing. A review conducted without the contract it claims to
+            apply is the failure this workflow exists to prevent. Empty markers
+            are expected, and fine, when the text says the base branch ships
+            none.
+
+            Report only actionable findings supported by changed lines,
+            highest severity first, capped at 20 inline comments. Skip style
+            nits. Do not approve or request changes through the review API.
+
+      # A conclusion of `success` says the action finished, NOT that a review
+      # reached the pull request. Whether agent-mode Claude is handed tools that
+      # can comment is a property of the action version and the consumer's
+      # wiring, and it cannot be settled by reading this file -- which is
+      # exactly how the retired workflow spent a month reporting green while
+      # posting nothing. So the claim is checked rather than assumed: if
+      # nothing appeared, the job goes red and the SHA is NOT recorded, so the
+      # next push retries instead of inheriting a false "already reviewed".
+      - name: Confirm a review actually reached the pull request
+        id: posted
+        if: >-
+          steps.changes.outputs.reviewable == 'true' &&
+          steps.dedup.outputs.skip == 'false' &&
+          steps.review.outputs.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SINCE: ${{ steps.stamp.outputs.started }}
+        run: |
+          set -euo pipefail
+          # The timestamp is interpolated into the filter, NOT passed with
+          # --arg: `gh api` has no --arg, and the earlier form failed at
+          # runtime with "accepts 1 arg(s), received 4" -- which would have
+          # made this step, and so the whole job, red on every single run
+          # while never recording a SHA. Neither actionlint, shellcheck nor
+          # zizmor can see a CLI misuse; only running it does. $SINCE comes
+          # from `date -u` two steps up, so there is nothing to inject.
+          #
+          # Bot accounts only. Matching the login alone let any HUMAN whose
+          # username contains "claude" satisfy this check by commenting after
+          # the job started -- recording the SHA as reviewed and suppressing
+          # every later review of it. A guard that is itself spoofable is
+          # worse than none, because it reads as covered.
+          # --slurp piped to jq for the same reason as the dedup step: under
+          # --paginate, --jq runs per page, so `| length` returns one integer
+          # per page and `$((comments + reviews))` fails the moment a pull
+          # request passes 100 comments. `.[][]` flattens the page array.
+          comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp \
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at >= \"${SINCE}\"))] | length")"
+          reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp \
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at >= \"${SINCE}\"))] | length")"
+          # INLINE review comments live at /pulls/{n}/comments -- a different
+          # endpoint from both of the above. The tool this workflow now grants,
+          # mcp__github_inline_comment__create_inline_comment, posts here, and
+          # the prompt asks for up to twenty of them. Omitting this query meant
+          # the likeliest success path counted as "posted nothing": the job
+          # would fail on every run, never record a success, and so never
+          # dedup -- the granted tool working perfectly and the guard calling
+          # it a failure.
+          inline="$(gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --slurp \
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at >= \"${SINCE}\"))] | length")"
+          total=$((comments + reviews + inline))
+          if [ "$total" -eq 0 ]; then
+            {
+              echo "### Claude review posted nothing"
+              echo
+              echo "The action reported success but no Claude-authored comment or"
+              echo "review appeared on this pull request. Treat this PR as UNREVIEWED."
+              echo "Most likely the reviewer has no tool able to comment; check the"
+              echo "action's tool configuration for this version."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer reported success but posted nothing; treating as unreviewed." >&2
+            exit 1
+          fi
+          echo "Review reached the pull request (${total} artefact(s): ${comments} comment(s), ${reviews} review(s), ${inline} inline)." >> "$GITHUB_STEP_SUMMARY"
+
+      # An early exit with no conclusion and no stated reason fails, so green
+      # means reviewed. The retired workflow reported green while reviewing
+      # nothing for a month; silence is the failure mode to catch.
+      - name: Report review outcome
+        if: ${{ !cancelled() && steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' }}
+        env:
+          CONCLUSION: ${{ steps.review.outputs.conclusion }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CONCLUSION" ]; then
+            echo "The reviewer produced no conclusion; treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
+          [ "$CONCLUSION" = "success" ] || {
+            echo "The reviewer reported a failure; treat this PR as unreviewed." >&2
+            exit 1
+          }
