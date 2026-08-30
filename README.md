@@ -47,6 +47,12 @@ jobs:
     uses: tsviser/crossroads-ci/.github/workflows/_supply-chain.yml@main
     with: { npm-audit: true }
 
+  # Requires the caller workflow to fire on `synchronize`, or the reviewer
+  # only ever sees a pull request's opening state:
+  #   on:
+  #     pull_request:
+  #       types: [opened, synchronize, reopened, ready_for_review]
+  # A caller with no `types:` gets those by default and needs no change.
   ai-review:
     # Pin a SHA, not @main. The tamper-resistance argument for this workflow
     # rests on a consumer's pull request being unable to move the ref it

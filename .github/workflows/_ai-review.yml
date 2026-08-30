@@ -172,6 +172,17 @@ jobs:
           # outright on a private repository -- four of the seven fleet repos,
           # the intended consumer among them. It is also unnecessary:
           # fetch-depth: 0 already populates refs/remotes/origin/*.
+          # Distinguish "no contract in the tree" from "could not read the
+          # tree". Both used to land in the else branch, so an unresolvable
+          # base ref silently downgraded to the general brief -- dropping the
+          # base-ref guarantee without saying so, which is the one thing this
+          # step exists to provide.
+          if ! git rev-parse --verify --quiet "origin/${BASE_REF}^{commit}" >/dev/null; then
+            echo "Cannot resolve origin/${BASE_REF}; refusing to review without" >&2
+            echo "establishing whether a contract exists on the base branch." >&2
+            exit 1
+          fi
+
           if git show "origin/${BASE_REF}:${GUIDELINES}" > "$dest" 2>/dev/null; then
             echo "contract=${dest}" >> "$GITHUB_OUTPUT"
             echo "Contract: ${GUIDELINES} as of origin/${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
@@ -217,6 +228,11 @@ jobs:
             echo "contract_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Mark the time before the model runs
+        id: stamp
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        run: echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Claude review
         id: review
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
@@ -254,10 +270,16 @@ jobs:
             highest severity first, capped at 20 inline comments. Skip style
             nits. Do not approve or request changes through the review API.
 
-      # The marker lands only after the action reports a conclusion, so a
-      # crashed or silently-skipped review does not mark the SHA as done --
-      # the next delivery retries it.
-      - name: Record reviewed SHA
+      # A conclusion of `success` says the action finished, NOT that a review
+      # reached the pull request. Whether agent-mode Claude is handed tools that
+      # can comment is a property of the action version and the consumer's
+      # wiring, and it cannot be settled by reading this file -- which is
+      # exactly how the retired workflow spent a month reporting green while
+      # posting nothing. So the claim is checked rather than assumed: if
+      # nothing appeared, the job goes red and the SHA is NOT recorded, so the
+      # next push retries instead of inheriting a false "already reviewed".
+      - name: Confirm a review actually reached the pull request
+        id: posted
         if: >-
           steps.changes.outputs.reviewable == 'true' &&
           steps.dedup.outputs.skip == 'false' &&
@@ -266,17 +288,56 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          SINCE: ${{ steps.stamp.outputs.started }}
+        run: |
+          set -euo pipefail
+          comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq --arg since "$SINCE" \
+            '[.[] | select((.user.login | test("claude"; "i")) and (.updated_at > $since))] | length')"
+          reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
+            --jq --arg since "$SINCE" \
+            '[.[] | select((.user.login | test("claude"; "i")) and (.submitted_at > $since))] | length')"
+          total=$((comments + reviews))
+          if [ "$total" -eq 0 ]; then
+            {
+              echo "### Claude review posted nothing"
+              echo
+              echo "The action reported success but no Claude-authored comment or"
+              echo "review appeared on this pull request. Treat this PR as UNREVIEWED."
+              echo "Most likely the reviewer has no tool able to comment; check the"
+              echo "action's tool configuration for this version."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer reported success but posted nothing; treating as unreviewed." >&2
+            exit 1
+          fi
+          echo "Review reached the pull request (${total} artefact(s))." >> "$GITHUB_STEP_SUMMARY"
+
+      # The marker lands only after the action reports a conclusion, so a
+      # crashed or silently-skipped review does not mark the SHA as done --
+      # the next delivery retries it.
+      - name: Record reviewed SHA
+        if: >-
+          steps.changes.outputs.reviewable == 'true' &&
+          steps.dedup.outputs.skip == 'false' &&
+          steps.review.outputs.conclusion == 'success' &&
+          steps.posted.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # printf rather than a two-line quoted string. The string form is
-          # correct -- its second line's indentation belongs to the YAML block
-          # scalar and is stripped before bash sees it, so the comment does not
-          # render as a code block -- but it has now been read as a bug in
-          # three separate reviews. Code that reliably reads as broken costs
-          # attention every time someone looks at it.
-          body="$(printf '<!-- crossroads-ai-review:reviewed-sha=%s -->\nClaude reviewed `%s`.' \
-            "$HEAD_SHA" "$HEAD_SHA")"
+          # NOTE for the next reviewer: the indentation on the second line
+          # below belongs to the YAML block scalar and is stripped before bash
+          # sees it. The parsed value carries zero leading spaces, so this does
+          # NOT render as a Markdown code block. Verified against the parsed
+          # scalar, not the raw file. Three reviews have flagged it; a printf
+          # rewrite was tried and reverted because the backticks inside a
+          # single-quoted format string trip shellcheck SC2016 through
+          # actionlint, trading a false positive for a real CI failure.
+          body="<!-- crossroads-ai-review:reviewed-sha=${HEAD_SHA} -->
+          Claude reviewed \`${HEAD_SHA}\`."
           marker_id="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .id' \
             | tail -n 1)"
