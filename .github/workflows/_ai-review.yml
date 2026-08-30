@@ -175,15 +175,15 @@ jobs:
           if git show "origin/${BASE_REF}:${GUIDELINES}" > "$dest" 2>/dev/null; then
             echo "contract=${dest}" >> "$GITHUB_OUTPUT"
             echo "Contract: ${GUIDELINES} as of origin/${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
-            # Carried INLINE into the prompt, not merely referenced by path.
-            # Claude Code grants file access to its working directory; this
-            # file is deliberately outside the checkout so it cannot join the
-            # diff under review, which put it out of reach. --add-dir opens it
-            # again, but a path the model silently fails to read would end as a
-            # confident review conducted without the contract -- and the marker
-            # would record that SHA as reviewed. Passing the bytes removes the
-            # question. The delimiter is checked because GitHub rejects an
-            # output whose body contains it.
+            # Carried INLINE into the prompt, never by path. Claude Code
+            # grants file access to its working directory, and this file is
+            # deliberately outside the checkout so it cannot join the diff
+            # under review -- which also put it out of the model's reach. A
+            # path the model silently failed to read would have ended as a
+            # confident review conducted under no contract, with the marker
+            # recording that SHA as reviewed. Passing the bytes removes the
+            # question, and leaves the file as nothing but a staging buffer
+            # for the read below.
             # Random per-run delimiter. A fixed one had to be guarded against
             # appearing in the contract, and that guard emitted an EMPTY
             # contract_body -- which the prompt reads as "contract claimed but
@@ -224,9 +224,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
           use_sticky_comment: true
+          # No --add-dir. It was added when the contract reached the model by
+          # PATH, which sat outside Claude Code's working directory. The
+          # contract is now inlined into the prompt, so nothing reads that
+          # file and the grant bought only a wider readable surface -- the
+          # whole runner temp, and whatever unrelated artifacts it holds.
           claude_args: |
             --max-turns ${{ inputs.max-turns }}
-            --add-dir ${{ runner.temp }}
           prompt: |
             Review this pull request.
 
