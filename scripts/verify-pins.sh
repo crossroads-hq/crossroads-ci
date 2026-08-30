@@ -9,8 +9,21 @@
 # change here reach every repository at once -- but it trades content drift for
 # version drift, and nothing measured the second until now.
 #
-#   scripts/verify-pins.sh            # report; exit 1 only on a BROKEN pin
-#   STRICT=1 scripts/verify-pins.sh   # also exit 1 when any pin is behind
+#   scripts/verify-pins.sh            # report; exit 1 on anything UNCHECKABLE
+#   STRICT=1 scripts/verify-pins.sh   # also exit 1 on anything NOT CURRENT
+#
+# Precisely, because the two categories are easy to conflate:
+#
+#   Always exit 1 -- the run could not establish the answer. A pin naming a
+#   commit or component this repository does not have; a repository whose
+#   workflow listing could not be read; a workflow file that could not be
+#   fetched or decoded; and, for a profile that requires a gate, a repository
+#   with no workflows at all or an empty workflows directory.
+#
+#   Exit 1 only under STRICT -- the answer is known and is "not current".
+#   A pin behind on its component, a mutable ref, or a ref that is not an
+#   ancestor of the base. These are normal states a fleet passes through, so
+#   they report and exit 0 by default.
 #
 # "Behind" counts commits touching THAT COMPONENT'S path, not commits on main.
 # A gate pinned before thirty governance edits is not behind; a gate pinned
@@ -169,7 +182,20 @@ while read -r repo profile branch _; do
   rm -f "$err"
 
   if [ -z "$workflows" ]; then
-    printf '%s\n    no workflow files on %s\n' "$repo" "$branch"
+    # Same judgement as the 404 above, for the same reason: `full` requires a
+    # PR Validation gate, and a gate lives in a workflow file. A directory
+    # that exists but holds none is exactly as gate-less as a missing one, and
+    # reporting it as an unremarkable fact hid that.
+    case "$profile" in
+      minimal)
+        printf '%s\n    no workflow files on %s (minimal: expected)\n' "$repo" "$branch"
+        ;;
+      *)
+        printf '%s\n    BROKEN: profile %s requires a PR Validation gate, but %s has an empty .github/workflows\n' \
+          "$repo" "$profile" "$branch"
+        broken=1
+        ;;
+    esac
     continue
   fi
 
@@ -219,7 +245,7 @@ while read -r repo profile branch _; do
 done < "$fleet_file"
 
 echo
-echo "${pins_seen} pin(s); ${behind_total} behind or unpinned; base ${base} at $(git rev-parse --short "$base")"
+echo "${pins_seen} pin(s); ${behind_total} not current (behind, unpinned or diverged); base ${base} at $(git rev-parse --short "$base")"
 
 if [ "$broken" -ne 0 ]; then
   echo
