@@ -291,6 +291,10 @@ jobs:
           SINCE: ${{ steps.stamp.outputs.started }}
         run: |
           set -euo pipefail
+          # `$since` below is a jq variable bound by --arg, not a shell
+          # expansion, so single quotes are correct. shellcheck cannot tell the
+          # two apart and actionlint fails the run on its advice.
+          # shellcheck disable=SC2016
           comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq --arg since "$SINCE" \
             '[.[] | select((.user.login | test("claude"; "i")) and (.updated_at > $since))] | length')"
