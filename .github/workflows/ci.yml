@@ -98,8 +98,14 @@ jobs:
         run: |
           set -euo pipefail
           ruby -ryaml -e 'ARGV.each { |f| YAML.safe_load(File.read(f)) }' actions/*/action.yml
-          node --check actions/*/*.js
-          echo "action.yml files parse; action scripts parse"
+          # One file per invocation. `node --check a.js b.js` parses only the
+          # FIRST argument -- the rest land in process.argv -- so it exits 0
+          # on a broken second file. A check that reports success having
+          # verified almost nothing is the exact defect this workflow exists
+          # to close, so it does not get to ship inside the fix.
+          n=0
+          for f in actions/*/*.js; do node --check "$f"; n=$((n + 1)); done
+          echo "action.yml files parse; ${n} action scripts parse"
 
       # The merge gate for every repository in the fleet. It shipped untested
       # -- and unparsed -- until now; a typo here reaches all of them at once.

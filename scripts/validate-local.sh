@@ -53,8 +53,11 @@ echo "  all fleet entries render"
 
 echo "Composite actions parse"
 ruby -ryaml -e 'ARGV.each { |f| YAML.safe_load(File.read(f)) }' actions/*/action.yml
-node --check actions/*/*.js
-echo "  action.yml files parse; action scripts parse"
+# One file per invocation -- see the matching note in ci.yml: `node --check`
+# parses only its first argument and exits 0 on a broken second file.
+n=0
+for f in actions/*/*.js; do node --check "$f"; n=$((n + 1)); done
+echo "  action.yml files parse; ${n} action scripts parse"
 
 echo "Gate logic tests"
 node --test actions/gate/check.test.js
