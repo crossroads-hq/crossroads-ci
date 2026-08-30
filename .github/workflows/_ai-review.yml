@@ -300,23 +300,23 @@ jobs:
           SINCE: ${{ steps.stamp.outputs.started }}
         run: |
           set -euo pipefail
+          # The timestamp is interpolated into the filter, NOT passed with
+          # --arg: `gh api` has no --arg, and the earlier form failed at
+          # runtime with "accepts 1 arg(s), received 4" -- which would have
+          # made this step, and so the whole job, red on every single run
+          # while never recording a SHA. Neither actionlint, shellcheck nor
+          # zizmor can see a CLI misuse; only running it does. $SINCE comes
+          # from `date -u` two steps up, so there is nothing to inject.
+          #
           # Bot accounts only. Matching the login alone let any HUMAN whose
           # username contains "claude" satisfy this check by commenting after
-          # the job started -- which would record the SHA as reviewed and
-          # suppress every later review of it. An anti-spoof guard that is
-          # itself spoofable is worse than none, because it reads as covered.
-          #
-          # `$since` below is a jq variable bound by --arg, not a shell
-          # expansion, so single quotes are correct. shellcheck cannot tell the
-          # two apart and actionlint fails the run on its advice.
-          # shellcheck disable=SC2016
+          # the job started -- recording the SHA as reviewed and suppressing
+          # every later review of it. A guard that is itself spoofable is
+          # worse than none, because it reads as covered.
           comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq --arg since "$SINCE" \
-            '[.[] | select(.user.type == "Bot" and (.user.login | test("claude"; "i")) and (.updated_at > $since))] | length')"
-          # shellcheck disable=SC2016
+            --jq "[.[] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
           reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
-            --jq --arg since "$SINCE" \
-            '[.[] | select(.user.type == "Bot" and (.user.login | test("claude"; "i")) and (.submitted_at > $since))] | length')"
+            --jq "[.[] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at > \"${SINCE}\"))] | length")"
           total=$((comments + reviews))
           if [ "$total" -eq 0 ]; then
             {
