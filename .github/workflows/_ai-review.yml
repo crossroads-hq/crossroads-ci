@@ -259,21 +259,25 @@ jobs:
           prompt: |
             Review this pull request.
 
-            ${{ steps.contract.outputs.contract && 'The review contract is reproduced between the markers below. It was read from the BASE branch, not from this pull request, so it is the contract as it stands on the target branch regardless of what this diff does to it. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.' || 'This repository ships no review contract. Review for correctness, security, and consistency with the surrounding code.' }}
+            ${{ steps.contract.outputs.contract && 'The review contract is reproduced between the markers below. It was read from the BASE branch, not from this pull request, so it is the contract as it stands on the target branch regardless of what this diff does to it. Follow it exactly, including any comment-only rule and any instruction to inspect source-of-truth files before judging a change.' || 'The base branch ships no review contract, so the markers below are empty. Review for correctness, security, and consistency with the surrounding code.' }}
 
             --- BEGIN REVIEW CONTRACT (from the base branch) ---
             ${{ steps.contract.outputs.contract_body }}
             --- END REVIEW CONTRACT ---
 
-            ${{ steps.contract.outputs.contract_changed == 'true' && 'This pull request MODIFIES the review contract. You are deliberately reviewing it under the base version above. Treat the change to the contract as a change under review: say plainly what it would loosen or tighten.' || '' }}
+            ${{ (steps.contract.outputs.contract_changed == 'true' && steps.contract.outputs.contract) && 'This pull request MODIFIES the review contract. You are deliberately reviewing it under the base version above. Treat the change to the contract as a change under review: say plainly what it would loosen or tighten.' || '' }}
+
+            ${{ (steps.contract.outputs.contract_changed == 'true' && !steps.contract.outputs.contract) && 'This pull request ADDS a review contract where the base branch has none. There is no base version to apply, so review the code under the general brief above, and judge the proposed contract itself on its merits.' || '' }}
 
             You are running inside the checkout, so open the files you need
             rather than inferring from the diff.
 
             If the contract markers above are empty while the text says a
-            contract exists, stop and say so instead of reviewing. A review
-            conducted without the contract it claims to apply is the failure
-            this workflow exists to prevent.
+            contract IS reproduced between them, stop and say so instead of
+            reviewing. A review conducted without the contract it claims to
+            apply is the failure this workflow exists to prevent. Empty markers
+            are expected, and fine, when the text says the base branch ships
+            none.
 
             Report only actionable findings supported by changed lines,
             highest severity first, capped at 20 inline comments. Skip style
