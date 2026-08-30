@@ -111,11 +111,15 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Bot-authored comments only. Matching on body text alone let ANY
-          # commenter post the marker for the current head SHA and suppress
-          # the review -- and `tail -n 1` meant their comment won.
+          # Written by the Record step below under GITHUB_TOKEN, so it is
+          # always github-actions[bot]. Matching on body text alone let ANY
+          # commenter suppress a review, and `tail -n 1` meant their comment
+          # won; `.user.type == "Bot"` narrowed that to any installed App,
+          # which is still every bot in the repository. This is the author.
+          # Worst case if it ever differs: dedup stops matching and a SHA is
+          # reviewed twice -- it fails toward reviewing, not toward skipping.
           reviewed="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '.[] | select(.user.type == "Bot") | .body' \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .body' \
             | sed -n 's/.*<!-- crossroads-ai-review:reviewed-sha=\([0-9a-f]*\) -->.*/\1/p' \
             | tail -n 1)"
           if [ "$reviewed" = "$HEAD_SHA" ]; then
@@ -146,6 +150,22 @@ jobs:
           GUIDELINES: ${{ inputs.guidelines-file }}
         run: |
           set -euo pipefail
+
+          # Normalise once. `guidelines-file` is documented repo-relative, but
+          # a caller may reasonably write `./.github/review-guidelines.md`.
+          # That breaks BOTH uses below in ways that fail quietly: `git show
+          # <ref>:./path` does not resolve, and the pull request file list from
+          # the API carries no `./`, so the contract_changed grep would miss a
+          # PR that edits the contract -- the reviewer would then not be told
+          # the rules it is applying are the very thing under change.
+          while :; do
+            case "$GUIDELINES" in
+              ./*) GUIDELINES="${GUIDELINES#./}" ;;
+              /*)  GUIDELINES="${GUIDELINES#/}" ;;
+              *)   break ;;
+            esac
+          done
+
           dest="${RUNNER_TEMP}/review-guidelines.md"
           # No `git fetch` here. The checkout above runs with
           # persist-credentials: false, so a fetch carries no token and fails
@@ -248,7 +268,7 @@ jobs:
           body="<!-- crossroads-ai-review:reviewed-sha=${HEAD_SHA} -->
           Claude reviewed \`${HEAD_SHA}\`."
           marker_id="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '.[] | select(.user.type == "Bot" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .id' \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .id' \
             | tail -n 1)"
           if [ -n "$marker_id" ]; then
             gh api --method PATCH "repos/${REPO}/issues/comments/${marker_id}" -f body="$body" --silent
