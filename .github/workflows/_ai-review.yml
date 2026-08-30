@@ -162,11 +162,11 @@ jobs:
 
           # Normalise once. `guidelines-file` is documented repo-relative, but
           # a caller may reasonably write `./.github/review-guidelines.md`.
-          # That breaks BOTH uses below in ways that fail quietly: `git show
-          # <ref>:./path` does not resolve, and the pull request file list from
-          # the API carries no `./`, so the contract_changed grep would miss a
-          # PR that edits the contract -- the reviewer would then not be told
-          # the rules it is applying are the very thing under change.
+          # That breaks BOTH uses below in ways that fail quietly: the
+          # contents API does not resolve `./path`, and the pull request file
+          # list carries no `./`, so the contract_changed grep would miss a PR
+          # that edits the contract -- the reviewer would then not be told the
+          # rules it is applying are the very thing under change.
           while :; do
             case "$GUIDELINES" in
               ./*) GUIDELINES="${GUIDELINES#./}" ;;
@@ -176,53 +176,48 @@ jobs:
           done
 
           dest="${RUNNER_TEMP}/review-guidelines.md"
-          # No `git fetch` here. The checkout above runs with
-          # persist-credentials: false, so a fetch carries no token and fails
-          # outright on a private repository -- four of the seven fleet repos,
-          # the intended consumer among them. It is also unnecessary:
-          # fetch-depth: 0 already populates refs/remotes/origin/*.
-          # Distinguish "no contract in the tree" from "could not read the
-          # tree". Both used to land in the else branch, so an unresolvable
-          # base ref silently downgraded to the general brief -- dropping the
-          # base-ref guarantee without saying so, which is the one thing this
-          # step exists to provide.
-          if ! git rev-parse --verify --quiet "origin/${BASE_REF}^{commit}" >/dev/null; then
-            echo "Cannot resolve origin/${BASE_REF}; refusing to review without" >&2
+
+          # Read from the API, not from local git refs. The checkout above
+          # pins `ref` to the head SHA, and a SHA checkout does not guarantee
+          # refs/remotes/origin/* is populated -- so `git show origin/<base>:...`
+          # rested on an assumption that varies by repository and run, with a
+          # hard failure guard on top of it. `?ref=<base>` enforces the same
+          # "from the base branch, never from this pull request" guarantee
+          # without depending on what checkout happened to leave on disk, and
+          # it authenticates, so it works on the four private fleet repos.
+          #
+          # Three outcomes, deliberately distinct: the base ref cannot be
+          # resolved (fatal -- we cannot establish what the contract is), the
+          # file is absent on base (legitimate; fall back to the general
+          # brief), or it is present (use it).
+          if ! gh api "repos/${REPO}/commits/${BASE_REF}" --jq '.sha' >/dev/null 2>&1; then
+            echo "Cannot resolve base ref '${BASE_REF}'; refusing to review without" >&2
             echo "establishing whether a contract exists on the base branch." >&2
             exit 1
           fi
 
-          if git show "origin/${BASE_REF}:${GUIDELINES}" > "$dest" 2>/dev/null; then
+          if encoded="$(gh api "repos/${REPO}/contents/${GUIDELINES}?ref=${BASE_REF}" \
+              --jq '.content' 2>/dev/null)"; then
+            # `.content` comes back EMPTY for a file over 1 MB. Treating that as
+            # "no contract" would silently drop the guarantee, so it is fatal.
+            if [ -z "$encoded" ]; then
+              echo "Contract '${GUIDELINES}' exists on ${BASE_REF} but returned no" >&2
+              echo "content (over the 1 MB contents limit?); refusing to review." >&2
+              exit 1
+            fi
+            printf '%s' "$encoded" | base64 -d > "$dest"
             echo "contract=${dest}" >> "$GITHUB_OUTPUT"
-            echo "Contract: ${GUIDELINES} as of origin/${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
-            # Carried INLINE into the prompt, never by path. Claude Code
-            # grants file access to its working directory, and this file is
-            # deliberately outside the checkout so it cannot join the diff
-            # under review -- which also put it out of the model's reach. A
-            # path the model silently failed to read would have ended as a
-            # confident review conducted under no contract, with the marker
-            # recording that SHA as reviewed. Passing the bytes removes the
-            # question, and leaves the file as nothing but a staging buffer
-            # for the read below.
-            # Random per-run delimiter. A fixed one had to be guarded against
-            # appearing in the contract, and that guard emitted an EMPTY
-            # contract_body -- which the prompt reads as "contract claimed but
-            # missing" and treats as a hard stop. A contract that happened to
-            # quote the delimiter would have disabled review entirely. 128 bits
-            # of urandom cannot collide with content written before it existed.
+            echo "Contract: ${GUIDELINES} as of ${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
             delim="CROSSROADS_CONTRACT_EOF_$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
             {
               echo "contract_body<<${delim}"
-              # Command substitution strips trailing newlines and printf adds
-              # exactly one, so the delimiter always starts its own line even
-              # if the contract does not end with a newline.
               printf '%s\n' "$(cat "$dest")"
               echo "${delim}"
             } >> "$GITHUB_OUTPUT"
           else
             echo "contract=" >> "$GITHUB_OUTPUT"
             echo "contract_body=" >> "$GITHUB_OUTPUT"
-            echo "No ${GUIDELINES} on origin/${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+            echo "No ${GUIDELINES} on ${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # A pull request editing the contract is reviewed under the base
