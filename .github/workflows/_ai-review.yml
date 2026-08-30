@@ -164,16 +164,21 @@ jobs:
             # would record that SHA as reviewed. Passing the bytes removes the
             # question. The delimiter is checked because GitHub rejects an
             # output whose body contains it.
-            if grep -qxF 'CROSSROADS_CONTRACT_EOF' "$dest"; then
-              echo "Contract contains the output delimiter; passing by path only." >> "$GITHUB_STEP_SUMMARY"
-              echo "contract_body=" >> "$GITHUB_OUTPUT"
-            else
-              {
-                echo "contract_body<<CROSSROADS_CONTRACT_EOF"
-                cat "$dest"
-                echo "CROSSROADS_CONTRACT_EOF"
-              } >> "$GITHUB_OUTPUT"
-            fi
+            # Random per-run delimiter. A fixed one had to be guarded against
+            # appearing in the contract, and that guard emitted an EMPTY
+            # contract_body -- which the prompt reads as "contract claimed but
+            # missing" and treats as a hard stop. A contract that happened to
+            # quote the delimiter would have disabled review entirely. 128 bits
+            # of urandom cannot collide with content written before it existed.
+            delim="CROSSROADS_CONTRACT_EOF_$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+            {
+              echo "contract_body<<${delim}"
+              # Command substitution strips trailing newlines and printf adds
+              # exactly one, so the delimiter always starts its own line even
+              # if the contract does not end with a newline.
+              printf '%s\n' "$(cat "$dest")"
+              echo "${delim}"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "contract=" >> "$GITHUB_OUTPUT"
             echo "contract_body=" >> "$GITHUB_OUTPUT"
