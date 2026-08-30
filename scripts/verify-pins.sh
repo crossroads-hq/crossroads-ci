@@ -79,6 +79,17 @@ report_pin() {
     return 0
   fi
 
+  # A path that exists at neither end is a pin to something this repository
+  # no longer ships. rev-list counts zero commits touching it, so the pin would
+  # read as `current` -- the most misleading answer available.
+  if ! git cat-file -e "${ref}:${component}" 2>/dev/null \
+     && ! git cat-file -e "${base}:${component}" 2>/dev/null; then
+    printf '    %-42s %-10.8s BROKEN: no such component at this ref or on %s  [%s]\n' \
+      "$component" "$ref" "$base" "$source_file"
+    broken=1
+    return 0
+  fi
+
   n="$(git rev-list --count "${ref}..${base}" -- "$component")"
   when="$(git log -1 --format=%cs "$ref")"
 
@@ -119,13 +130,22 @@ while read -r repo profile branch _; do
   found=0
   while IFS= read -r wf; do
     [ -n "$wf" ] || continue
+    # Both failure paths below set `broken`. A workflow whose pins were never
+    # examined must not be reported as clean -- that is the same
+    # green-having-checked-nothing this script exists to detect, and the
+    # contents API reaches it easily: `.content` comes back EMPTY for a file
+    # over 1 MB, which decodes to nothing and looks exactly like "no pins".
     if ! encoded="$(gh api "repos/${repo}/contents/.github/workflows/${wf}?ref=${branch}" \
         --jq '.content' 2>/dev/null)"; then
-      printf '    could not read %s\n' "$wf"
+      printf '    UNREADABLE: %s could not be fetched\n' "$wf"
+      broken=1
       continue
     fi
-    body="$(printf '%s' "$encoded" | base64 -d 2>/dev/null || true)"
-    [ -n "$body" ] || continue
+    if ! body="$(printf '%s' "$encoded" | base64 -d 2>/dev/null)" || [ -z "$body" ]; then
+      printf '    UNREADABLE: %s did not decode (over the 1 MB contents limit?)\n' "$wf"
+      broken=1
+      continue
+    fi
 
     # `uses:` only. A bare mention of the control plane in a comment is not a
     # dependency, and counting one as a pin sends someone chasing prose.
