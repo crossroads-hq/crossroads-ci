@@ -183,11 +183,11 @@ jobs:
 
           # Normalise once. `guidelines-file` is documented repo-relative, but
           # a caller may reasonably write `./.github/review-guidelines.md`.
-          # That breaks BOTH uses below in ways that fail quietly: the
-          # contents API does not resolve `./path`, and the pull request file
-          # list carries no `./`, so the contract_changed grep would miss a PR
-          # that edits the contract -- the reviewer would then not be told the
-          # rules it is applying are the very thing under change.
+          # That breaks BOTH uses below in ways that fail quietly: the contents
+          # API does not resolve `./path`, and the pull request file list
+          # carries no `./`, so the contract_changed grep would miss a PR that
+          # edits the contract -- the reviewer would then not be told the rules
+          # it is applying are the very thing under change.
           while :; do
             case "$GUIDELINES" in
               ./*) GUIDELINES="${GUIDELINES#./}" ;;
@@ -198,67 +198,88 @@ jobs:
 
           dest="${RUNNER_TEMP}/review-guidelines.md"
 
-          # Read from the API, not from local git refs. The checkout above
-          # pins `ref` to the head SHA, and a SHA checkout does not guarantee
-          # refs/remotes/origin/* is populated -- so `git show origin/<base>:...`
-          # rested on an assumption that varies by repository and run, with a
-          # hard failure guard on top of it. `?ref=<base>` enforces the same
+          # Read from the API, not from local git refs: the checkout pins `ref`
+          # to the head SHA and a SHA checkout does not guarantee
+          # refs/remotes/origin/* is populated. `?ref=<base>` enforces the same
           # "from the base branch, never from this pull request" guarantee
-          # without depending on what checkout happened to leave on disk, and
-          # it authenticates, so it works on the four private fleet repos.
-          #
-          # Three outcomes, deliberately distinct: the base ref cannot be
-          # resolved (fatal -- we cannot establish what the contract is), the
-          # file is absent on base (legitimate; fall back to the general
-          # brief), or it is present (use it).
+          # without depending on what checkout left on disk, and it
+          # authenticates, so it works on private consumers.
           if ! gh api "repos/${REPO}/commits/${BASE_REF}" --jq '.sha' >/dev/null 2>&1; then
             echo "Cannot resolve base ref '${BASE_REF}'; refusing to review without" >&2
             echo "establishing whether a contract exists on the base branch." >&2
             exit 1
           fi
 
-          # Distinguish a 404 from every other failure. `2>/dev/null` on this
-          # call made a 403, a rate limit or any 5xx read as "the file is not
-          # there", dropping an existing contract while the summary said it
-          # simply did not exist -- silently voiding the base-rules guarantee.
-          # Same defect, same shape, as the one fixed in verify-pins.sh: an
-          # error path collapsed into an expected-absence path.
+          # Exactly one of these becomes true, and every path that is not a
+          # real usable contract must still reach the contract_changed
+          # detection at the end -- so no branch here exits early on success.
+          have_contract=false
           err="$(mktemp)"
-          if encoded="$(gh api "repos/${REPO}/contents/${GUIDELINES}?ref=${BASE_REF}" \
-              --jq '.content' 2>"$err")"; then
-            # `.content` comes back EMPTY for a file over 1 MB. Treating that as
-            # "no contract" would silently drop the guarantee, so it is fatal.
-            if [ -z "$encoded" ]; then
-              echo "Contract '${GUIDELINES}' exists on ${BASE_REF} but returned no" >&2
-              echo "content (over the 1 MB contents limit?); refusing to review." >&2
+
+          if meta="$(gh api "repos/${REPO}/contents/${GUIDELINES}?ref=${BASE_REF}" 2>"$err")"; then
+            kind="$(printf '%s' "$meta" | jq -r 'if type == "array" then "directory" else .type end')"
+            if [ "$kind" != "file" ]; then
+              echo "'${GUIDELINES}' on ${BASE_REF} is a ${kind}, not a file; refusing" >&2
+              echo "to review under a contract path that does not name one." >&2
               exit 1
             fi
-            printf '%s' "$encoded" | base64 -d > "$dest"
+            size="$(printf '%s' "$meta" | jq -r '.size')"
+            encoded="$(printf '%s' "$meta" | jq -r '.content')"
+
+            # An empty `.content` has two unrelated causes and they must not
+            # share a branch. A 0-byte file is a real committed contract that
+            # carries no rules: unhelpful, not broken, and failing the job for
+            # it would break a repository for committing an empty file. A file
+            # WITH bytes whose content came back empty is the API declining to
+            # inline it past 1 MB, which would silently drop a real contract,
+            # so that stays fatal. `.size` is what separates them.
+            if [ "${size:-0}" -eq 0 ]; then
+              echo "${GUIDELINES} on ${BASE_REF} is empty; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+            elif [ -z "$encoded" ]; then
+              echo "Contract '${GUIDELINES}' on ${BASE_REF} is ${size} bytes but the" >&2
+              echo "API returned no content (over the 1 MB inline limit); refusing." >&2
+              exit 1
+            else
+              printf '%s' "$encoded" | base64 -d > "$dest"
+              have_contract=true
+              echo "Contract: ${GUIDELINES} as of ${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          elif grep -q 'HTTP 404' "$err"; then
+            # Absent on base. The one legitimate fallback: distinguishing it
+            # from a 403, a rate limit or any 5xx is the whole point of
+            # capturing stderr rather than discarding it.
+            echo "No ${GUIDELINES} on ${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Could not read '${GUIDELINES}' on ${BASE_REF}. This is NOT a" >&2
+            echo "missing file, so it is not the general-brief fallback:" >&2
+            sed 's/^/    /' "$err" >&2
+            exit 1
+          fi
+          rm -f "$err"
+
+          if [ "$have_contract" = true ]; then
             echo "contract=${dest}" >> "$GITHUB_OUTPUT"
-            echo "Contract: ${GUIDELINES} as of ${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
+            # Carried INLINE into the prompt, never by path: Claude Code grants
+            # file access to its working directory, and this file sits outside
+            # the checkout so it cannot join the diff under review -- which also
+            # put it out of the model's reach. Passing the bytes removes the
+            # question. Random per-run delimiter, because a fixed one needed a
+            # collision guard whose fallback emitted an empty body, which the
+            # prompt reads as a hard stop.
             delim="CROSSROADS_CONTRACT_EOF_$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
             {
               echo "contract_body<<${delim}"
               printf '%s\n' "$(cat "$dest")"
               echo "${delim}"
             } >> "$GITHUB_OUTPUT"
-          elif grep -q 'HTTP 404' "$err"; then
+          else
             echo "contract=" >> "$GITHUB_OUTPUT"
             echo "contract_body=" >> "$GITHUB_OUTPUT"
-            echo "No ${GUIDELINES} on ${BASE_REF}; using the general brief." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Could not read '${GUIDELINES}' on ${BASE_REF}. This is NOT a" >&2
-            echo "missing file, so it is not the general-brief fallback:" >&2
-            sed 's/^/    /' "$err" >&2
-            rm -f "$err"
-            exit 1
           fi
-          rm -f "$err"
 
           # A pull request editing the contract is reviewed under the base
-          # version AND told that it is doing so, because a change to the
-          # rules is itself a change worth reviewing. The old guard's answer
-          # was to review neither the rules nor the code.
+          # version AND told that it is doing so, because a change to the rules
+          # is itself a change worth reviewing. Runs on every path above.
           if gh api "repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename' \
               | grep -qxF "${GUIDELINES}"; then
             echo "contract_changed=true" >> "$GITHUB_OUTPUT"
