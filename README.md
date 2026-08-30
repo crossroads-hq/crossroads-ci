@@ -48,7 +48,18 @@ jobs:
     with: { npm-audit: true }
 
   ai-review:
-    uses: tsviser/crossroads-ci/.github/workflows/_ai-review.yml@main
+    # Pin a SHA, not @main. The tamper-resistance argument for this workflow
+    # rests on a consumer's pull request being unable to move the ref it
+    # runs; @main is a ref this repository can move under every consumer.
+    uses: tsviser/crossroads-ci/.github/workflows/_ai-review.yml@<commit-sha>
+    # A called workflow's jobs may not exceed the CALLER's grant. The review
+    # job needs `pull-requests: write` to comment and `id-token: write` for
+    # the Claude App token; `id-token` defaults to none and is never
+    # inherited, so omitting this block fails the run at startup.
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
     secrets:
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 

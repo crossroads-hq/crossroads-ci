@@ -102,8 +102,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # Bot-authored comments only. Matching on body text alone let ANY
+          # commenter post the marker for the current head SHA and suppress
+          # the review -- and `tail -n 1` meant their comment won.
           reviewed="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '.[].body' \
+            --jq '.[] | select(.user.type == "Bot") | .body' \
             | sed -n 's/.*<!-- crossroads-ai-review:reviewed-sha=\([0-9a-f]*\) -->.*/\1/p' \
             | tail -n 1)"
           if [ "$reviewed" = "$HEAD_SHA" ]; then
@@ -135,8 +138,11 @@ jobs:
         run: |
           set -euo pipefail
           dest="${RUNNER_TEMP}/review-guidelines.md"
-          git fetch --no-tags --quiet origin "${BASE_REF}"
-
+          # No `git fetch` here. The checkout above runs with
+          # persist-credentials: false, so a fetch carries no token and fails
+          # outright on a private repository -- four of the seven fleet repos,
+          # the intended consumer among them. It is also unnecessary:
+          # fetch-depth: 0 already populates refs/remotes/origin/*.
           if git show "origin/${BASE_REF}:${GUIDELINES}" > "$dest" 2>/dev/null; then
             echo "contract=${dest}" >> "$GITHUB_OUTPUT"
             echo "Contract: ${GUIDELINES} as of origin/${BASE_REF}." >> "$GITHUB_STEP_SUMMARY"
@@ -198,7 +204,7 @@ jobs:
           body="<!-- crossroads-ai-review:reviewed-sha=${HEAD_SHA} -->
           Claude reviewed \`${HEAD_SHA}\`."
           marker_id="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq '.[] | select(.body | contains("crossroads-ai-review:reviewed-sha=")) | .id' \
+            --jq '.[] | select(.user.type == "Bot" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .id' \
             | tail -n 1)"
           if [ -n "$marker_id" ]; then
             gh api --method PATCH "repos/${REPO}/issues/comments/${marker_id}" -f body="$body" --silent
