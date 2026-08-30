@@ -72,10 +72,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      # Dedup reads /commits/{sha}/check-runs. Job-level permissions are a
-      # whitelist -- anything unlisted is `none`, not inherited -- so without
-      # this the dedup step 403s and takes the job with it.
-      checks: read
+      # Dedup reads /actions/runs and /actions/runs/{id}/jobs. It used to read
+      # /commits/{sha}/check-runs, which needed `checks: read`; moving to the
+      # Actions API to scope dedup to the caller's own workflow file changed
+      # the scope with it, and the grant did not follow. Job-level permissions
+      # are a whitelist -- anything unlisted is `none`, never inherited -- so
+      # the mismatch would 403 and take the job with it.
+      actions: read
       # The action exchanges the workflow's OIDC token for a Claude App token
       # so comments are attributed to claude[bot]. Safe under the fork guard.
       id-token: write
