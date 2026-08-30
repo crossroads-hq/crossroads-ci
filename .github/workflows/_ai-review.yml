@@ -368,7 +368,17 @@ jobs:
             | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
           reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp \
             | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at > \"${SINCE}\"))] | length")"
-          total=$((comments + reviews))
+          # INLINE review comments live at /pulls/{n}/comments -- a different
+          # endpoint from both of the above. The tool this workflow now grants,
+          # mcp__github_inline_comment__create_inline_comment, posts here, and
+          # the prompt asks for up to twenty of them. Omitting this query meant
+          # the likeliest success path counted as "posted nothing": the job
+          # would fail on every run, never record a success, and so never
+          # dedup -- the granted tool working perfectly and the guard calling
+          # it a failure.
+          inline="$(gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --slurp \
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
+          total=$((comments + reviews + inline))
           if [ "$total" -eq 0 ]; then
             {
               echo "### Claude review posted nothing"
@@ -381,7 +391,7 @@ jobs:
             echo "Reviewer reported success but posted nothing; treating as unreviewed." >&2
             exit 1
           fi
-          echo "Review reached the pull request (${total} artefact(s))." >> "$GITHUB_STEP_SUMMARY"
+          echo "Review reached the pull request (${total} artefact(s): ${comments} comment(s), ${reviews} review(s), ${inline} inline)." >> "$GITHUB_STEP_SUMMARY"
 
       # An early exit with no conclusion and no stated reason fails, so green
       # means reviewed. The retired workflow reported green while reviewing
