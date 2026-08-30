@@ -60,7 +60,7 @@ report_pin() {
   component="$1" ref="$2" source_file="$3"
   pins_seen=$((pins_seen + 1))
 
-  if ! printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+  if ! printf '%s' "$ref" | grep -Eq '^[0-9a-fA-F]{40}$'; then
     # Not a SHA. A tag or branch can be moved under the consumer without any
     # review on either side, which is the thing pinning exists to prevent.
     printf '    %-42s %-10s UNPINNED (mutable ref)  [%s]\n' "$component" "$ref" "$source_file"
@@ -90,8 +90,20 @@ report_pin() {
     return 0
   fi
 
-  n="$(git rev-list --count "${ref}..${base}" -- "$component")"
   when="$(git log -1 --format=%cs "$ref")"
+
+  # `ref..base` counts what BASE has that REF lacks. For a pin off a branch
+  # that never merged, that can be zero while the pin carries component
+  # changes of its own -- reported as `current` when the consumer is actually
+  # running control-plane code this repository never merged.
+  if ! git merge-base --is-ancestor "$ref" "$base" 2>/dev/null; then
+    printf '    %-42s %-10.8s DIVERGED: not an ancestor of %s  (%s)  [%s]\n' \
+      "$component" "$ref" "$base" "$when" "$source_file"
+    behind_total=$((behind_total + 1))
+    return 0
+  fi
+
+  n="$(git rev-list --count "${ref}..${base}" -- "$component")"
 
   if [ "$n" -eq 0 ]; then
     printf '    %-42s %-10.8s current  (%s)\n' "$component" "$ref" "$when"
@@ -100,7 +112,10 @@ report_pin() {
 
   printf '    %-42s %-10.8s %s change(s) behind  (%s)\n' "$component" "$ref" "$n" "$when"
   # The actionable half: what bumping would actually bring in.
-  git log --format='          %h %s' "${ref}..${base}" -- "$component" | head -n 5
+  # `-n 5`, not `| head -n 5`: head closes the pipe, git takes SIGPIPE, and
+  # pipefail turns that into rc 141 -- aborting the whole run precisely when a
+  # component has enough changes to be worth reading. Verified before fixing.
+  git log -n 5 --format='          %h %s' "${ref}..${base}" -- "$component"
   if [ "$n" -gt 5 ]; then
     printf '          ... and %s more\n' "$((n - 5))"
   fi
@@ -109,20 +124,52 @@ report_pin() {
 
 while read -r repo profile branch _; do
   case "$repo" in ''|'#'*) continue ;; esac
-  # profile is unused here; every repository is scanned regardless of tier.
-  : "$profile"
 
   # Key on gh's exit status, not on empty output: `gh api` prints the 404 body
   # to STDOUT, so a repository with no .github/workflows hands back a JSON
   # error object that reads as a perfectly non-empty file list.
-  if ! workflows="$(gh api "repos/${repo}/contents/.github/workflows?ref=${branch}" \
-      --jq '.[] | select(.type == "file") | .name' 2>/dev/null)"; then
-    workflows=""
+  #
+  # And distinguish WHICH failure. Collapsing every error to "no workflows"
+  # meant revoked access, a rename, a rate limit or any 5xx read as "nothing
+  # to check here" and exited 0 -- hiding every pin in that repository,
+  # including a broken one. Only a 404 says the directory is absent; anything
+  # else says this script did not get to look.
+  err="$(mktemp)"
+  if workflows="$(gh api "repos/${repo}/contents/.github/workflows?ref=${branch}" \
+      --jq '.[] | select(.type == "file") | .name' 2>"$err")"; then
+    api_rc=0
+  else
+    api_rc=1
   fi
 
+  if [ "$api_rc" -ne 0 ]; then
+    if grep -q 'HTTP 404' "$err"; then
+      # Absent directory. Expected for a `minimal` repository -- that profile
+      # exists precisely because the repository has no CI. For a `full` one it
+      # is a contradiction: full requires a PR Validation gate, and a gate
+      # lives in a workflow.
+      case "$profile" in
+        minimal)
+          printf '%s\n    no workflows on %s (minimal: expected)\n' "$repo" "$branch"
+          ;;
+        *)
+          printf '%s\n    BROKEN: profile %s requires a PR Validation gate, but %s has no .github/workflows\n' \
+            "$repo" "$profile" "$branch"
+          broken=1
+          ;;
+      esac
+    else
+      printf '%s\n    UNREACHABLE: could not list .github/workflows on %s\n' "$repo" "$branch"
+      sed 's/^/        /' "$err"
+      broken=1
+    fi
+    rm -f "$err"
+    continue
+  fi
+  rm -f "$err"
+
   if [ -z "$workflows" ]; then
-    # Tier D has no CI by definition; this is a fact, not a divergence.
-    printf '%s\n    no workflows on %s\n' "$repo" "$branch"
+    printf '%s\n    no workflow files on %s\n' "$repo" "$branch"
     continue
   fi
 
@@ -151,7 +198,7 @@ while read -r repo profile branch _; do
     # dependency, and counting one as a pin sends someone chasing prose.
     refs="$(printf '%s\n' "$body" \
       | grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' \
-      | grep -ohE "${control_plane}/[A-Za-z0-9._/-]+@[A-Za-z0-9._-]+" \
+      | grep -ohE "${control_plane}/[A-Za-z0-9._/-]+@[A-Za-z0-9._/-]+" \
       | sort -u || true)"
 
     while IFS= read -r pin; do
@@ -176,8 +223,10 @@ echo "${pins_seen} pin(s); ${behind_total} behind or unpinned; base ${base} at $
 
 if [ "$broken" -ne 0 ]; then
   echo
-  echo "A pin does not resolve to a commit in this repository. The consumer is" >&2
-  echo "referencing something that no longer exists; fix it there." >&2
+  echo "Something above could not be checked, or resolves to nothing. Either a" >&2
+  echo "consumer references a commit or component this repository does not have," >&2
+  echo "or this run could not read a repository it was asked about. Both mean the" >&2
+  echo "report above is incomplete -- do not read it as a clean fleet." >&2
   exit 1
 fi
 
