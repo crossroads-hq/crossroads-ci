@@ -29,6 +29,12 @@ inputs:
       sits out docs-only diffs, a path-filtered verify leg, a publish-check
       that only runs on main. A skip only ever excuses a job that chose not to
       run; `cancelled` and `failure` never pass.
+
+      CAUTION: a job also skips when something it `needs` fails. So whenever
+      you excuse a path-filtered job here, the job computing that filter must
+      appear in `results` and must NOT be excused -- otherwise its failure
+      skips every leg it feeds, each skip is excused, and the gate passes
+      having checked nothing. This repository's own gate shipped that hole.
     required: false
     default: ""
 
