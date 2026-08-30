@@ -47,9 +47,9 @@ on:
         default: .github/review-guidelines.md
       max-turns:
         description: Claude Code turn budget for one review.
-        type: string
+        type: number
         required: false
-        default: "25"
+        default: 25
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
@@ -269,8 +269,14 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          body="<!-- crossroads-ai-review:reviewed-sha=${HEAD_SHA} -->
-          Claude reviewed \`${HEAD_SHA}\`."
+          # printf rather than a two-line quoted string. The string form is
+          # correct -- its second line's indentation belongs to the YAML block
+          # scalar and is stripped before bash sees it, so the comment does not
+          # render as a code block -- but it has now been read as a bug in
+          # three separate reviews. Code that reliably reads as broken costs
+          # attention every time someone looks at it.
+          body="$(printf '<!-- crossroads-ai-review:reviewed-sha=%s -->\nClaude reviewed `%s`.' \
+            "$HEAD_SHA" "$HEAD_SHA")"
           marker_id="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("crossroads-ai-review:reviewed-sha="))) | .id' \
             | tail -n 1)"
