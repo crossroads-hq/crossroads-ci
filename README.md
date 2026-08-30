@@ -67,6 +67,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      checks: read          # head-SHA dedup reads /commits/{sha}/check-runs
       id-token: write
     secrets:
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

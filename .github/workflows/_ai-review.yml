@@ -72,6 +72,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Dedup reads /commits/{sha}/check-runs. Job-level permissions are a
+      # whitelist -- anything unlisted is `none`, not inherited -- so without
+      # this the dedup step 403s and takes the job with it.
+      checks: read
       # The action exchanges the workflow's OIDC token for a Claude App token
       # so comments are attributed to claude[bot]. Safe under the fork guard.
       id-token: write
@@ -132,8 +136,13 @@ jobs:
           # the caller's naming is unknown here and only the suffix is fixed.
           # The current run's own check is in_progress with a null conclusion
           # and cannot match.
-          prior="$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs" --paginate \
-            --jq '[.check_runs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
+          # --slurp piped to jq, NOT --jq. Under --paginate, gh applies --jq to
+          # each page separately, so `| length` emits one integer per page --
+          # verified: a six-page query returned "1 1 1 2 2 1". The comparison
+          # below would then be run on a multi-word string. --slurp hands jq
+          # every page at once and yields a single count.
+          prior="$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs" --paginate --slurp \
+            | jq '[.[].check_runs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
           if [ "${prior:-0}" -gt 0 ]; then
             echo "Head ${HEAD_SHA} already has a successful Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -351,10 +360,14 @@ jobs:
           # the job started -- recording the SHA as reviewed and suppressing
           # every later review of it. A guard that is itself spoofable is
           # worse than none, because it reads as covered.
-          comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-            --jq "[.[] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
-          reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate \
-            --jq "[.[] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at > \"${SINCE}\"))] | length")"
+          # --slurp piped to jq for the same reason as the dedup step: under
+          # --paginate, --jq runs per page, so `| length` returns one integer
+          # per page and `$((comments + reviews))` fails the moment a pull
+          # request passes 100 comments. `.[][]` flattens the page array.
+          comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --slurp \
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at > \"${SINCE}\"))] | length")"
+          reviews="$(gh api "repos/${REPO}/pulls/${PR}/reviews" --paginate --slurp \
+            | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.submitted_at > \"${SINCE}\"))] | length")"
           total=$((comments + reviews))
           if [ "$total" -eq 0 ]; then
             {
