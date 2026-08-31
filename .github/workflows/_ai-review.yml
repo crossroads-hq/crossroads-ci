@@ -444,6 +444,15 @@ jobs:
             highest severity first, capped at 20 inline comments. Skip style
             nits. Do not approve or request changes through the review API.
 
+            Whatever you find, ALWAYS finish by posting exactly one summary
+            comment on the pull request with `gh pr comment`: a short verdict
+            naming what you inspected and either the findings, by severity, or
+            the explicit statement that you found no actionable issues. This
+            job verifies that a comment reached the pull request and FAILS on
+            silence, because a reviewer that finds nothing and says nothing is
+            indistinguishable from a reviewer that could not post at all. A
+            clean diff is a result worth posting.
+
       # A conclusion of `success` says the action finished, NOT that a review
       # reached the pull request. Whether agent-mode Claude is handed tools that
       # can comment is a property of the action version and the consumer's
