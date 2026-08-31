@@ -46,10 +46,16 @@ on:
         required: false
         default: .github/review-guidelines.md
       max-turns:
-        description: Claude Code turn budget for one review.
+        description: >-
+          Claude Code turn budget for one review. Measured: a one-file script
+          diff took 14 turns; 25 was exhausted mid-review by a moderate
+          multi-file PR (crossroads-ui#181, subtype error_max_turns), which
+          fails the job AFTER the thorough path already worked. The budget
+          bounds a runaway, not a diligent review, so it sits well above the
+          largest measured need; the 30-minute job timeout is the hard stop.
         type: number
         required: false
-        default: 25
+        default: 60
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
