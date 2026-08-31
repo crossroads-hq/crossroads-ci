@@ -396,11 +396,6 @@ jobs:
         uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
-          # TEMPORARY, for diagnosing the instant is_error:true failure (1
-          # turn, $0, no model usage): the action redacts the result's error
-          # text by default, and the redaction hides the one line naming the
-          # actual failure. Remove once the reviewer demonstrably reviews.
-          show_full_output: true
           # This is AGENT mode: `prompt:` is set and track_progress defaults to
           # false. In agent mode nothing is granted implicitly -- a prompt can
           # ask for twenty inline comments and the model will have no tool able
@@ -448,6 +443,15 @@ jobs:
             Report only actionable findings supported by changed lines,
             highest severity first, capped at 20 inline comments. Skip style
             nits. Do not approve or request changes through the review API.
+
+            Whatever you find, ALWAYS finish by posting exactly one summary
+            comment on the pull request with `gh pr comment`: a short verdict
+            naming what you inspected and either the findings, by severity, or
+            the explicit statement that you found no actionable issues. This
+            job verifies that a comment reached the pull request and FAILS on
+            silence, because a reviewer that finds nothing and says nothing is
+            indistinguishable from a reviewer that could not post at all. A
+            clean diff is a result worth posting.
 
       # A conclusion of `success` says the action finished, NOT that a review
       # reached the pull request. Whether agent-mode Claude is handed tools that
