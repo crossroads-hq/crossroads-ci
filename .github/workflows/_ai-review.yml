@@ -396,6 +396,11 @@ jobs:
         uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
+          # TEMPORARY, for diagnosing the instant is_error:true failure (1
+          # turn, $0, no model usage): the action redacts the result's error
+          # text by default, and the redaction hides the one line naming the
+          # actual failure. Remove once the reviewer demonstrably reviews.
+          show_full_output: true
           # This is AGENT mode: `prompt:` is set and track_progress defaults to
           # false. In agent mode nothing is granted implicitly -- a prompt can
           # ask for twenty inline comments and the model will have no tool able
