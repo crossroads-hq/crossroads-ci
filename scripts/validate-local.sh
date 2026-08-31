@@ -13,11 +13,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Collect every missing tool before exiting, so one run reports the full
+# install list instead of failing again on the next tool after each install.
+missing=()
 require() {
-  command -v "$1" >/dev/null || {
-    echo "$1 is required but not installed" >&2
-    exit 1
-  }
+  command -v "$1" >/dev/null || missing+=("$1")
 }
 
 require bash
@@ -25,6 +25,11 @@ require shellcheck
 require jq
 require ruby
 require node
+
+if [ "${#missing[@]}" -gt 0 ]; then
+  printf '%s is required but not installed\n' "${missing[@]}" >&2
+  exit 1
+fi
 
 echo "Shell syntax"
 n=0
