@@ -30,14 +30,17 @@ rules:
   # -- something claiming to be from this machine but not signed by it --
   # cannot land on a protected branch.
   require_signed_commits: true
-  # Copilot reviews every push automatically on repositories under the full
-  # profile. Decision 2026-08-24: crossroads-ui is the fleet's main working
-  # repository and carries the strongest available review stack -- OpenAI
-  # reviewer + Claude reviewer + Copilot -- while the reviewer comparison
-  # continues. Applied fleet-wide for uniformity; if Copilot proves noisy on
-  # the docs/vault repositories, split them to a separate profile rather
-  # than weakening this one.
-  automatic_copilot_review: true
+  # Decision 2026-08-31, reversing 2026-08-24: the reviewer comparison ended
+  # when automatic Copilot review became the fleet's dominant AI spend --
+  # $78 gross of Copilot credits in August, $10.56 of it in one day once the
+  # included allowance ran out, with 25 of the re-reviews landing on a single
+  # iterating pull request. The Claude reviewer (_ai-review.yml) now covers
+  # review-on-push from the subscription at no marginal cost, so the ruleset
+  # no longer requests Copilot on push anywhere in the fleet. Copilot remains
+  # available on demand per pull request. The personal-account setting for
+  # automatic review was switched off the same day; this rule was the second,
+  # repo-level source of the same spend.
+  automatic_copilot_review: false
   allow_force_pushes: false
   allow_branch_deletion: false
 
