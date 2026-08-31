@@ -135,6 +135,28 @@ jobs:
       npm-audit: false
       osv-scan: false
 
+  # The first consumer of the rebuilt reviewer. The workflow merged in #19
+  # with zero callers, so it had never run; a reusable workflow with no
+  # caller reviews nothing, which is the exact silence its header warns
+  # about. Local `uses:`, like _supply-chain.yml above: the SHA-pinning rule
+  # in the README is for OTHER repositories, where the pin stops this repo
+  # moving the ref under them -- meaningless for the repo the file lives in.
+  # Deliberately absent from the gate's needs: the reviewer advises, the
+  # gate blocks, and _ai-review.yml's header records why those stay apart.
+  ai-review:
+    name: AI review
+    uses: ./.github/workflows/_ai-review.yml
+    # A called workflow's jobs may not exceed the caller's grant (same rule
+    # as supply-chain above); id-token is never inherited, so omitting this
+    # block fails the run at startup.
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read         # head-SHA dedup reads /actions/runs and its jobs
+      id-token: write
+    secrets:
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
   gate:
     name: PR Validation
     # The fleet convention, applied to the fleet's own control plane: one
