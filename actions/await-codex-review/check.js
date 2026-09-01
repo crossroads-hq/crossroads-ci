@@ -52,6 +52,43 @@ function fetchReviews() {
   }
 }
 
+function fetchComments() {
+  const endpoint = `repos/${process.env.REPO}/issues/${process.env.PR}/comments`;
+  const proc = spawnSync("gh", ["api", endpoint, "--paginate", "--slurp"], {
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  if (proc.status !== 0) {
+    return { error: proc.stderr.trim() || `gh exited ${proc.status}` };
+  }
+
+  try {
+    const pages = JSON.parse(proc.stdout);
+    if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+      return { error: "GitHub comments response was not an array of pages." };
+    }
+    return { comments: pages.flat() };
+  } catch (error) {
+    return { error: `GitHub comments response was not valid JSON: ${error.message}` };
+  }
+}
+
+function isCodexBot(user) {
+  return (
+    user?.id === CODEX_USER_ID &&
+    user?.login === CODEX_LOGIN &&
+    user?.type === "Bot"
+  );
+}
+
+function reviewedCommit(body) {
+  if (typeof body !== "string") return "";
+  return body.match(
+    /^Codex Review: Didn't find any major issues\. :tada:\r?\n\r?\n\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`(?:\r?\n|$)/
+  )?.[1] || "";
+}
+
 for (const name of ["REPO", "PR", "HEAD_SHA", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]) {
   if (!process.env[name]) fail(`${name} is required.`);
 }
@@ -76,9 +113,7 @@ while (true) {
 
   const match = result.reviews.find(
     (review) =>
-      review?.user?.id === CODEX_USER_ID &&
-      review?.user?.login === CODEX_LOGIN &&
-      review?.user?.type === "Bot" &&
+      isCodexBot(review?.user) &&
       review?.commit_id === process.env.HEAD_SHA &&
       review?.submitted_at &&
       SUBMITTED_STATES.has(review?.state)
@@ -94,12 +129,40 @@ while (true) {
     break;
   }
 
+  const commentsResult = fetchComments();
+  if (commentsResult.error) {
+    console.log(`::warning::Could not query Codex review comments: ${commentsResult.error}`);
+    finish(
+      false,
+      "codex-status-error",
+      "",
+      "Could not verify whether Codex posted a clean review for the current head; falling back to Claude."
+    );
+    break;
+  }
+
+  const cleanComment = commentsResult.comments.find((comment) => {
+    if (!isCodexBot(comment?.user)) return false;
+    const commit = reviewedCommit(comment?.body);
+    return commit && process.env.HEAD_SHA.toLowerCase().startsWith(commit.toLowerCase());
+  });
+
+  if (cleanComment) {
+    finish(
+      true,
+      "codex-clean-comment-found",
+      "",
+      `Verified Codex clean-review comment #${cleanComment.id} for head ${process.env.HEAD_SHA}; Claude fallback is not needed.`
+    );
+    break;
+  }
+
   if (remaining === 0) {
     finish(
       false,
       "codex-review-timeout",
       "",
-      `No submitted Codex review was found for head ${process.env.HEAD_SHA} after ${waitSeconds} second(s); falling back to Claude.`
+      `No verified Codex review result was found for head ${process.env.HEAD_SHA} after ${waitSeconds} second(s); falling back to Claude.`
     );
     break;
   }

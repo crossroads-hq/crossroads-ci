@@ -8,7 +8,7 @@ const { spawnSync } = require("node:child_process");
 const CHECK = path.join(__dirname, "check.js");
 const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 const CODEX_USER_ID = 199175422;
-const HEAD_SHA = "head-123";
+const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 function review(overrides = {}) {
   return {
@@ -17,6 +17,17 @@ function review(overrides = {}) {
     commit_id: HEAD_SHA,
     state: "COMMENTED",
     submitted_at: "2026-09-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function cleanReviewComment(overrides = {}) {
+  return {
+    id: 23,
+    user: { id: CODEX_USER_ID, login: CODEX_LOGIN, type: "Bot" },
+    body: "Codex Review: Didn't find any major issues. :tada:\n\n**Reviewed commit:** `0123456789`",
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -38,7 +49,10 @@ function parseOutput(file) {
 
 function run({
   reviews = [[[]]],
-  failGh = false,
+  comments = [[[]]],
+  failReviews = false,
+  failComments = false,
+  malformedComments = false,
   wait = "0",
   poll = "30",
 } = {}) {
@@ -51,18 +65,35 @@ function run({
 
   const fakeGh = `#!/usr/bin/env node
 const fs = require("node:fs");
-const responses = JSON.parse(process.env.FAKE_GH_RESPONSES);
+const reviews = JSON.parse(process.env.FAKE_GH_REVIEWS);
+const comments = JSON.parse(process.env.FAKE_GH_COMMENTS);
 const state = process.env.FAKE_GH_STATE;
 const endpoint = process.argv[3] || "";
-if (!/\\/pulls\\/\\d+\\/reviews$/.test(endpoint)) {
+let kind;
+let responses;
+if (/\\/pulls\\/\\d+\\/reviews$/.test(endpoint)) {
+  kind = "reviews";
+  responses = reviews;
+} else if (/\\/issues\\/\\d+\\/comments$/.test(endpoint)) {
+  kind = "comments";
+  responses = comments;
+} else {
   console.error(\`unexpected endpoint: \${endpoint}\`);
   process.exit(2);
 }
-const count = fs.existsSync(state) ? Number(fs.readFileSync(state, "utf8")) : 0;
-fs.writeFileSync(state, String(count + 1));
-if (process.env.FAKE_GH_FAIL === "true") {
+const counts = fs.existsSync(state)
+  ? JSON.parse(fs.readFileSync(state, "utf8"))
+  : { reviews: 0, comments: 0 };
+const count = counts[kind];
+counts[kind] += 1;
+fs.writeFileSync(state, JSON.stringify(counts));
+if (process.env.FAKE_GH_FAIL_KIND === kind) {
   console.error("simulated GitHub API failure");
   process.exit(1);
+}
+if (process.env.FAKE_GH_MALFORMED_KIND === kind) {
+  process.stdout.write("{");
+  process.exit(0);
 }
 const response = responses[Math.min(count, responses.length - 1)];
 process.stdout.write(JSON.stringify(response));
@@ -83,9 +114,11 @@ process.stdout.write(JSON.stringify(response));
       POLL_SECONDS: poll,
       GITHUB_OUTPUT: output,
       GITHUB_STEP_SUMMARY: summary,
-      FAKE_GH_RESPONSES: JSON.stringify(reviews),
+      FAKE_GH_REVIEWS: JSON.stringify(reviews),
+      FAKE_GH_COMMENTS: JSON.stringify(comments),
       FAKE_GH_STATE: state,
-      FAKE_GH_FAIL: String(failGh),
+      FAKE_GH_FAIL_KIND: failReviews ? "reviews" : failComments ? "comments" : "",
+      FAKE_GH_MALFORMED_KIND: malformedComments ? "comments" : "",
     },
   });
 
@@ -95,7 +128,9 @@ process.stdout.write(JSON.stringify(response));
     stderr: proc.stderr,
     output: parseOutput(output),
     summary: fs.existsSync(summary) ? fs.readFileSync(summary, "utf8") : "",
-    calls: fs.existsSync(state) ? Number(fs.readFileSync(state, "utf8")) : 0,
+    calls: fs.existsSync(state)
+      ? JSON.parse(fs.readFileSync(state, "utf8"))
+      : { reviews: 0, comments: 0 },
   };
   fs.rmSync(root, { recursive: true, force: true });
   return result;
@@ -112,6 +147,82 @@ test("accepts a submitted Codex review for the current head", () => {
   });
 });
 
+test("accepts the official Codex clean-review comment for the current head", () => {
+  const result = run({ comments: [[[cleanReviewComment()]]] });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.output, {
+    reviewed: "true",
+    reason: "codex-clean-comment-found",
+    "review-id": "",
+  });
+});
+
+test("does not accept a Codex clean-review comment for an older head", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        body: "Codex Review: Didn't find any major issues. :tada:\n\n**Reviewed commit:** `aaaaaaaaaa`",
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a spoofed clean-review comment", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        user: { id: 999, login: CODEX_LOGIN, type: "Bot" },
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a clean-review comment with a spoofed login", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        user: { id: CODEX_USER_ID, login: "codex-lookalike[bot]", type: "Bot" },
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a clean-review comment from a non-bot account", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        user: { id: CODEX_USER_ID, login: CODEX_LOGIN, type: "User" },
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept an official current-head comment that only quotes the clean verdict", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        body: "Found an issue because the workflow treats the text Codex Review: Didn't find any major issues. as a clean verdict.\n\n**Reviewed commit:** `0123456789`",
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
 test("waits and checks again before falling back", () => {
   const result = run({
     reviews: [[[]], [[review()]]],
@@ -120,7 +231,7 @@ test("waits and checks again before falling back", () => {
   });
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.calls, 2);
+  assert.equal(result.calls.reviews, 2);
   assert.equal(result.output.reviewed, "true");
 });
 
@@ -203,13 +314,14 @@ test("does not query pull request reactions because they are not bound to a head
   const result = run();
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.calls, 1);
+  assert.equal(result.calls.reviews, 1);
+  assert.equal(result.calls.comments, 1);
   assert.equal(result.output.reviewed, "false");
   assert.equal(result.output.reason, "codex-review-timeout");
 });
 
 test("falls back with an explicit unknown-status reason when GitHub cannot be queried", () => {
-  const result = run({ failGh: true });
+  const result = run({ failReviews: true });
 
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(result.output, {
@@ -218,6 +330,26 @@ test("falls back with an explicit unknown-status reason when GitHub cannot be qu
     "review-id": "",
   });
   assert.match(result.summary, /could not verify whether Codex reviewed/i);
+});
+
+test("fails closed when clean-review comments cannot be queried", () => {
+  const result = run({ failComments: true });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.output, {
+    reviewed: "false",
+    reason: "codex-status-error",
+    "review-id": "",
+  });
+  assert.match(result.summary, /could not verify whether Codex posted a clean review/i);
+});
+
+test("fails closed when clean-review comments are malformed JSON", () => {
+  const result = run({ malformedComments: true });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-status-error");
 });
 
 test("rejects invalid wait configuration instead of looping unpredictably", () => {

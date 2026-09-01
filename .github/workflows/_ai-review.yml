@@ -1,7 +1,8 @@
 # Reusable: Codex-first AI review for a pull request, deduplicated by head SHA.
 # Codex automatic review is triggered by the GitHub integration. This workflow
 # waits for its current-head verdict, then runs Claude Sonnet only when no
-# verified Codex review arrives within the bounded wait or its state is unknown.
+# verified Codex review result arrives within the bounded wait or its state is
+# unknown.
 #
 # Supersedes the _ai-review.yml retired 2026-08-24. That retirement recorded
 # "zero reviews produced across the comparison window"; the cause, in the same
@@ -61,8 +62,8 @@ on:
         default: 60
       codex-wait-seconds:
         description: >-
-          How long to wait for a submitted Codex review on the current head
-          before running Claude as the fallback reviewer. Zero checks once
+          How long to wait for a verified Codex review result on the current
+          head before running Claude as the fallback reviewer. Zero checks once
           without waiting. This is a delivery timeout, not a claim that Codex
           tokens were exhausted; GitHub exposes no such verified signal. Must
           be between 0 and 600 so Claude retains at least 35 minutes to run.
@@ -142,11 +143,12 @@ jobs:
       #
       # A check run is minted by Actions for a job that actually executed.
       # Nothing holding a token can forge one. But this job now has two green
-      # paths: a confirmed Claude delivery, or a Codex review that was present
-      # when the job ran. Codex reviews can later be dismissed, so a green job
-      # alone cannot safely dedup that path. Only the named Claude confirmation
-      # step is durable enough to skip directly; Codex-only successes flow to
-      # the verifier below and are revalidated against current review state.
+      # paths: a confirmed Claude delivery, or verified current-head Codex
+      # evidence that was present when the job ran. Formal Codex reviews can
+      # later be dismissed, so a green job alone cannot safely dedup that path.
+      # Only the named Claude confirmation step is durable enough to skip
+      # directly; Codex-only successes flow to the verifier below and are
+      # revalidated against the current formal-review or clean-comment state.
       - name: Check whether Claude already reviewed this head SHA
         id: dedup
         if: steps.changes.outputs.reviewable == 'true'
