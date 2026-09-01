@@ -29,7 +29,7 @@ test("the Claude fallback uses the lower-cost Sonnet model", () => {
 test("the workflow pins the detector with clean-comment support", () => {
   assert.match(
     workflow,
-    /uses: tsviser\/crossroads-ci\/actions\/await-codex-review@6db50448c75e3358c2a5524bb43c432f57ac7989 # await-codex-review v1/
+    /uses: tsviser\/crossroads-ci\/actions\/await-codex-review@c863c4b2c0e3614b50986277a22b962bc98402ee # await-codex-review v1/
   );
 });
 
