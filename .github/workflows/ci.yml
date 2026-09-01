@@ -109,8 +109,8 @@ jobs:
 
       # The merge gate for every repository in the fleet. It shipped untested
       # -- and unparsed -- until now; a typo here reaches all of them at once.
-      - name: Gate logic tests
-        run: node --test actions/gate/check.test.js
+      - name: Action logic tests
+        run: node --test actions/*/*.test.js
 
   supply-chain:
     name: Supply chain

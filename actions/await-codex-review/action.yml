@@ -1,0 +1,41 @@
+name: Await Codex review
+description: Wait for a submitted Codex review on the pull request's current head.
+
+inputs:
+  github-token:
+    description: Token used to read pull request reviews.
+    required: true
+  wait-seconds:
+    description: Maximum number of seconds to wait before allowing the fallback reviewer.
+    required: false
+    default: "600"
+  poll-seconds:
+    description: Seconds between review checks.
+    required: false
+    default: "30"
+
+outputs:
+  reviewed:
+    description: Whether Codex submitted a review for the current head.
+    value: ${{ steps.check.outputs.reviewed }}
+  reason:
+    description: Machine-readable reason for the result.
+    value: ${{ steps.check.outputs.reason }}
+  review-id:
+    description: GitHub review id when a current-head Codex review was found.
+    value: ${{ steps.check.outputs.review-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for Codex review
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        WAIT_SECONDS: ${{ inputs.wait-seconds }}
+        POLL_SECONDS: ${{ inputs.poll-seconds }}
+      run: node "$GITHUB_ACTION_PATH/check.js"

@@ -64,9 +64,9 @@ n=0
 for f in actions/*/*.js; do node --check "$f"; n=$((n + 1)); done
 echo "  action.yml files parse; ${n} action scripts parse"
 
-echo "Gate logic tests"
-node --test actions/gate/check.test.js
-echo "  gate logic passes"
+echo "Action logic tests"
+node --test actions/*/*.test.js
+echo "  action logic passes"
 
 if command -v docker >/dev/null; then
   echo "actionlint (docker)"
