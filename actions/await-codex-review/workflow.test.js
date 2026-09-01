@@ -25,3 +25,10 @@ test("the Claude fallback uses the lower-cost Sonnet model", () => {
     /claude_args:\s*\|\s*\n\s*--model sonnet\s*\n\s*--max-turns/s
   );
 });
+
+test("the workflow pins the detector with clean-comment support", () => {
+  assert.match(
+    workflow,
+    /uses: tsviser\/crossroads-ci\/actions\/await-codex-review@362dc736fc877e60b1f8e72c853d29c45997ee58 # await-codex-review v1/
+  );
+});
