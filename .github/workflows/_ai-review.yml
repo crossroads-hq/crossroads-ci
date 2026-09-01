@@ -64,7 +64,8 @@ on:
           How long to wait for a submitted Codex review on the current head
           before running Claude as the fallback reviewer. Zero checks once
           without waiting. This is a delivery timeout, not a claim that Codex
-          tokens were exhausted; GitHub exposes no such verified signal.
+          tokens were exhausted; GitHub exposes no such verified signal. Must
+          be between 0 and 600 so Claude retains at least 35 minutes to run.
         type: number
         required: false
         default: 600
@@ -140,11 +141,13 @@ jobs:
       # login, and it stayed mintable at every step.
       #
       # A check run is minted by Actions for a job that actually executed.
-      # Nothing holding a token can forge one. The record and the work become
-      # the same object: this job succeeds only if a review reached the pull
-      # request (see the confirm step below), so a prior success IS proof of a
-      # delivered review, and a prior failure leaves nothing to skip on.
-      - name: Check whether this head SHA was already reviewed
+      # Nothing holding a token can forge one. But this job now has two green
+      # paths: a confirmed Claude delivery, or a Codex review that was present
+      # when the job ran. Codex reviews can later be dismissed, so a green job
+      # alone cannot safely dedup that path. Only the named Claude confirmation
+      # step is durable enough to skip directly; Codex-only successes flow to
+      # the verifier below and are revalidated against current review state.
+      - name: Check whether Claude already reviewed this head SHA
         id: dedup
         if: steps.changes.outputs.reviewable == 'true'
         env:
@@ -175,17 +178,22 @@ jobs:
           wf_path="${wf_path#*/}"         # repo/.github/workflows/x.yml
           wf_path="${wf_path#*/}"         # .github/workflows/x.yml
 
-          prior=0
+          prior_claude=0
           for rid in $(gh api "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
               --paginate --slurp \
               | jq -r --arg p "$wf_path" '.[].workflow_runs[] | select(.path == $p) | .id'); do
             n="$(gh api "repos/${REPO}/actions/runs/${rid}/jobs" --paginate --slurp \
-              | jq '[.[].jobs[] | select((.name | endswith("AI review")) and .conclusion == "success")] | length')"
-            prior=$((prior + n))
+              | jq '[.[].jobs[]
+                       | select((.name | endswith("AI review")) and .conclusion == "success")
+                       | select(any(.steps[]?;
+                           .name == "Confirm a review actually reached the pull request" and
+                           .conclusion == "success"))]
+                    | length')"
+            prior_claude=$((prior_claude + n))
           done
 
-          if [ "${prior:-0}" -gt 0 ]; then
-            echo "Head ${HEAD_SHA} already has a successful AI review; skipping." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${prior_claude:-0}" -gt 0 ]; then
+            echo "Head ${HEAD_SHA} already has a confirmed Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -194,7 +202,7 @@ jobs:
       - name: Wait for Codex review
         id: codex
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
-        uses: tsviser/crossroads-ci/actions/await-codex-review@900cfb5ee8b742e3f9e5825668ffb6a7c63992f4 # await-codex-review v1
+        uses: tsviser/crossroads-ci/actions/await-codex-review@76a0f8da4205f8c15b87994c8a5678c1b5de2c5a # await-codex-review v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-seconds: ${{ inputs.codex-wait-seconds }}

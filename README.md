@@ -32,6 +32,12 @@ Here, the JSON profiles are the only copy.
 | `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
 
+A Codex thumbs-up reaction is intentionally not enough to suppress Claude: a
+reaction is not bound to a head SHA and can remain after another push. Only a
+submitted, non-dismissed Codex review for the current head is treated as a
+verified verdict. A clean reaction-only Codex pass therefore takes the
+conservative Claude fallback path.
+
 ## Usage
 
 ```sh
