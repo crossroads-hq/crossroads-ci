@@ -74,6 +74,28 @@ function fetchComments() {
   }
 }
 
+function resolveCommit(abbreviatedSha) {
+  const endpoint = `repos/${process.env.REPO}/commits/${abbreviatedSha}`;
+  const proc = spawnSync("gh", ["api", endpoint], {
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  if (proc.status !== 0) {
+    return { error: proc.stderr.trim() || `gh exited ${proc.status}` };
+  }
+
+  try {
+    const commit = JSON.parse(proc.stdout);
+    if (!commit || typeof commit !== "object" || !/^[0-9a-f]{40}$/i.test(commit.sha || "")) {
+      return { error: "GitHub commit response did not contain a full SHA." };
+    }
+    return { sha: commit.sha };
+  } catch (error) {
+    return { error: `GitHub commit response was not valid JSON: ${error.message}` };
+  }
+}
+
 function isCodexBot(user) {
   return (
     user?.id === CODEX_USER_ID &&
@@ -141,11 +163,40 @@ while (true) {
     break;
   }
 
-  const cleanComment = commentsResult.comments.find((comment) => {
-    if (!isCodexBot(comment?.user)) return false;
-    const commit = reviewedCommit(comment?.body);
-    return commit && process.env.HEAD_SHA.toLowerCase().startsWith(commit.toLowerCase());
-  });
+  let cleanComment;
+  let resolutionError = "";
+  const headSha = process.env.HEAD_SHA.toLowerCase();
+  for (const comment of commentsResult.comments) {
+    if (!isCodexBot(comment?.user)) continue;
+    const abbreviatedSha = reviewedCommit(comment?.body).toLowerCase();
+    if (!abbreviatedSha || !headSha.startsWith(abbreviatedSha)) continue;
+
+    if (abbreviatedSha.length === 40) {
+      cleanComment = comment;
+      break;
+    }
+
+    const resolved = resolveCommit(abbreviatedSha);
+    if (resolved.error) {
+      resolutionError = resolved.error;
+      continue;
+    }
+    if (resolved.sha.toLowerCase() === headSha) {
+      cleanComment = comment;
+      break;
+    }
+  }
+
+  if (!cleanComment && resolutionError) {
+    console.log(`::warning::Could not resolve Codex reviewed commit: ${resolutionError}`);
+    finish(
+      false,
+      "codex-status-error",
+      "",
+      "Could not resolve the reviewed commit to a unique full SHA; falling back to Claude."
+    );
+    break;
+  }
 
   if (cleanComment) {
     finish(

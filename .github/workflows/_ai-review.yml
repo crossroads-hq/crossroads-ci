@@ -69,7 +69,9 @@ on:
           be between 0 and 600 so Claude retains at least 35 minutes to run.
         type: number
         required: false
-        default: 180
+        # PR #20 measured a Codex review arriving about 190 seconds after the
+        # wait began, just beyond the former 180-second default.
+        default: 300
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.

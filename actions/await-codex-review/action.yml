@@ -3,7 +3,7 @@ description: Wait for a verified Codex review result on the pull request's curre
 
 inputs:
   github-token:
-    description: Token used to read pull request reviews and issue comments.
+    description: Token used to read pull request reviews, issue comments, and commits.
     required: true
   wait-seconds:
     description: Maximum seconds to wait before allowing fallback; must be between 0 and 600.

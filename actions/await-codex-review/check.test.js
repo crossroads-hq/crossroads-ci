@@ -50,9 +50,12 @@ function parseOutput(file) {
 function run({
   reviews = [[[]]],
   comments = [[[]]],
+  commits = { "0123456789": { sha: HEAD_SHA } },
   failReviews = false,
   failComments = false,
+  failCommits = false,
   malformedComments = false,
+  malformedCommits = false,
   wait = "0",
   poll = "30",
 } = {}) {
@@ -67,6 +70,7 @@ function run({
 const fs = require("node:fs");
 const reviews = JSON.parse(process.env.FAKE_GH_REVIEWS);
 const comments = JSON.parse(process.env.FAKE_GH_COMMENTS);
+const commits = JSON.parse(process.env.FAKE_GH_COMMITS);
 const state = process.env.FAKE_GH_STATE;
 const endpoint = process.argv[3] || "";
 let kind;
@@ -77,13 +81,15 @@ if (/\\/pulls\\/\\d+\\/reviews$/.test(endpoint)) {
 } else if (/\\/issues\\/\\d+\\/comments$/.test(endpoint)) {
   kind = "comments";
   responses = comments;
+} else if (/\\/commits\\/[0-9a-f]+$/.test(endpoint)) {
+  kind = "commits";
 } else {
   console.error(\`unexpected endpoint: \${endpoint}\`);
   process.exit(2);
 }
 const counts = fs.existsSync(state)
   ? JSON.parse(fs.readFileSync(state, "utf8"))
-  : { reviews: 0, comments: 0 };
+  : { reviews: 0, comments: 0, commits: 0 };
 const count = counts[kind];
 counts[kind] += 1;
 fs.writeFileSync(state, JSON.stringify(counts));
@@ -93,6 +99,15 @@ if (process.env.FAKE_GH_FAIL_KIND === kind) {
 }
 if (process.env.FAKE_GH_MALFORMED_KIND === kind) {
   process.stdout.write("{");
+  process.exit(0);
+}
+if (kind === "commits") {
+  const ref = endpoint.slice(endpoint.lastIndexOf("/") + 1);
+  if (!commits[ref]) {
+    console.error("simulated unknown or ambiguous commit");
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(commits[ref]));
   process.exit(0);
 }
 const response = responses[Math.min(count, responses.length - 1)];
@@ -116,9 +131,20 @@ process.stdout.write(JSON.stringify(response));
       GITHUB_STEP_SUMMARY: summary,
       FAKE_GH_REVIEWS: JSON.stringify(reviews),
       FAKE_GH_COMMENTS: JSON.stringify(comments),
+      FAKE_GH_COMMITS: JSON.stringify(commits),
       FAKE_GH_STATE: state,
-      FAKE_GH_FAIL_KIND: failReviews ? "reviews" : failComments ? "comments" : "",
-      FAKE_GH_MALFORMED_KIND: malformedComments ? "comments" : "",
+      FAKE_GH_FAIL_KIND: failReviews
+        ? "reviews"
+        : failComments
+          ? "comments"
+          : failCommits
+            ? "commits"
+            : "",
+      FAKE_GH_MALFORMED_KIND: malformedComments
+        ? "comments"
+        : malformedCommits
+          ? "commits"
+          : "",
     },
   });
 
@@ -130,7 +156,7 @@ process.stdout.write(JSON.stringify(response));
     summary: fs.existsSync(summary) ? fs.readFileSync(summary, "utf8") : "",
     calls: fs.existsSync(state)
       ? JSON.parse(fs.readFileSync(state, "utf8"))
-      : { reviews: 0, comments: 0 },
+      : { reviews: 0, comments: 0, commits: 0 },
   };
   fs.rmSync(root, { recursive: true, force: true });
   return result;
@@ -183,6 +209,39 @@ test("does not accept a Codex clean-review comment for an older head", () => {
 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a clean comment whose abbreviated SHA resolves to another commit", () => {
+  const result = run({
+    comments: [[[cleanReviewComment()]]],
+    commits: {
+      "0123456789": { sha: "0123456789ffffffffffffffffffffffffffffff" },
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+test("fails closed when an abbreviated reviewed SHA is ambiguous", () => {
+  const result = run({ comments: [[[cleanReviewComment()]]], failCommits: true });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-status-error");
+  assert.match(result.summary, /could not resolve the reviewed commit/i);
+});
+
+test("fails closed when commit resolution returns malformed JSON", () => {
+  const result = run({
+    comments: [[[cleanReviewComment()]]],
+    malformedCommits: true,
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-status-error");
 });
 
 test("does not accept a spoofed clean-review comment", () => {

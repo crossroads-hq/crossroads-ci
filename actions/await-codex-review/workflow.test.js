@@ -32,3 +32,10 @@ test("the workflow pins the detector with clean-comment support", () => {
     /uses: tsviser\/crossroads-ci\/actions\/await-codex-review@6db50448c75e3358c2a5524bb43c432f57ac7989 # await-codex-review v1/
   );
 });
+
+test("the Codex delivery wait covers the observed review latency", () => {
+  assert.match(
+    workflow,
+    /codex-wait-seconds:[\s\S]*?default: 300/
+  );
+});
