@@ -68,7 +68,7 @@ on:
           be between 0 and 600 so Claude retains at least 35 minutes to run.
         type: number
         required: false
-        default: 600
+        default: 180
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.

@@ -80,10 +80,10 @@ jobs:
       pull-requests: write
       actions: read         # head-SHA dedup reads /actions/runs and its jobs
       id-token: write
-    # Optional: defaults to 600. This is a delivery wait, not a token-exhaustion
+    # Optional: defaults to 180. This is a delivery wait, not a token-exhaustion
     # detector; GitHub does not expose Codex quota state to this workflow.
     with:
-      codex-wait-seconds: 600
+      codex-wait-seconds: 180
     secrets:
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
