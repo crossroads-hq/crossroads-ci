@@ -18,3 +18,10 @@ test("a prior Codex-only success is revalidated instead of deduplicated", () => 
     /select\(\(\.name \| endswith\("AI review"\)\) and \.conclusion == "success"\)\]\s*\| length/
   );
 });
+
+test("the Claude fallback uses the lower-cost Sonnet model", () => {
+  assert.match(
+    workflow,
+    /claude_args:\s*\|\s*\n\s*--model sonnet\s*\n\s*--max-turns/s
+  );
+});

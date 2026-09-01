@@ -7,12 +7,13 @@ const { spawnSync } = require("node:child_process");
 
 const CHECK = path.join(__dirname, "check.js");
 const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
+const CODEX_USER_ID = 199175422;
 const HEAD_SHA = "head-123";
 
 function review(overrides = {}) {
   return {
     id: 17,
-    user: { login: CODEX_LOGIN, type: "Bot" },
+    user: { id: CODEX_USER_ID, login: CODEX_LOGIN, type: "Bot" },
     commit_id: HEAD_SHA,
     state: "COMMENTED",
     submitted_at: "2026-09-01T00:00:00Z",
@@ -35,7 +36,12 @@ function parseOutput(file) {
   );
 }
 
-function run({ responses = [JSON.stringify([[]])], failGh = false, wait = "0", poll = "30" } = {}) {
+function run({
+  reviews = [[[]]],
+  failGh = false,
+  wait = "0",
+  poll = "30",
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "await-codex-review-"));
   const bin = path.join(root, "bin");
   const output = path.join(root, "output");
@@ -47,13 +53,19 @@ function run({ responses = [JSON.stringify([[]])], failGh = false, wait = "0", p
 const fs = require("node:fs");
 const responses = JSON.parse(process.env.FAKE_GH_RESPONSES);
 const state = process.env.FAKE_GH_STATE;
+const endpoint = process.argv[3] || "";
+if (!/\\/pulls\\/\\d+\\/reviews$/.test(endpoint)) {
+  console.error(\`unexpected endpoint: \${endpoint}\`);
+  process.exit(2);
+}
 const count = fs.existsSync(state) ? Number(fs.readFileSync(state, "utf8")) : 0;
 fs.writeFileSync(state, String(count + 1));
 if (process.env.FAKE_GH_FAIL === "true") {
   console.error("simulated GitHub API failure");
   process.exit(1);
 }
-process.stdout.write(responses[Math.min(count, responses.length - 1)]);
+const response = responses[Math.min(count, responses.length - 1)];
+process.stdout.write(JSON.stringify(response));
 `;
   fs.writeFileSync(path.join(bin, "gh"), fakeGh, { mode: 0o755 });
   fs.writeFileSync(path.join(bin, "sleep"), "#!/usr/bin/env node\n", { mode: 0o755 });
@@ -71,7 +83,7 @@ process.stdout.write(responses[Math.min(count, responses.length - 1)]);
       POLL_SECONDS: poll,
       GITHUB_OUTPUT: output,
       GITHUB_STEP_SUMMARY: summary,
-      FAKE_GH_RESPONSES: JSON.stringify(responses),
+      FAKE_GH_RESPONSES: JSON.stringify(reviews),
       FAKE_GH_STATE: state,
       FAKE_GH_FAIL: String(failGh),
     },
@@ -90,7 +102,7 @@ process.stdout.write(responses[Math.min(count, responses.length - 1)]);
 }
 
 test("accepts a submitted Codex review for the current head", () => {
-  const result = run({ responses: [JSON.stringify([[review()]])] });
+  const result = run({ reviews: [[[review()]]] });
 
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(result.output, {
@@ -102,7 +114,7 @@ test("accepts a submitted Codex review for the current head", () => {
 
 test("waits and checks again before falling back", () => {
   const result = run({
-    responses: [JSON.stringify([[]]), JSON.stringify([[review()]])],
+    reviews: [[[]], [[review()]]],
     wait: "30",
     poll: "30",
   });
@@ -114,7 +126,7 @@ test("waits and checks again before falling back", () => {
 
 test("does not accept a Codex review for an older head", () => {
   const result = run({
-    responses: [JSON.stringify([[review({ commit_id: "old-head" })]])],
+    reviews: [[[review({ commit_id: "old-head" })]]],
   });
 
   assert.equal(result.code, 0, result.stderr);
@@ -127,7 +139,18 @@ test("does not accept a Codex review for an older head", () => {
 
 test("does not accept a spoofed reviewer login", () => {
   const result = run({
-    responses: [JSON.stringify([[review({ user: { login: "codex-lookalike[bot]", type: "Bot" } })]])],
+    reviews: [[[review({ user: { login: "codex-lookalike[bot]", type: "Bot" } })]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a review with the official login but a different user id", () => {
+  const result = run({
+    reviews: [
+      [[review({ user: { id: 999, login: CODEX_LOGIN, type: "Bot" } })]],
+    ],
   });
 
   assert.equal(result.code, 0, result.stderr);
@@ -136,13 +159,13 @@ test("does not accept a spoofed reviewer login", () => {
 
 test("does not accept pending or dismissed reviews", () => {
   const result = run({
-    responses: [
-      JSON.stringify([
+    reviews: [
+      [
         [
           review({ id: 18, state: "PENDING", submitted_at: null }),
           review({ id: 19, state: "DISMISSED" }),
         ],
-      ]),
+      ],
     ],
   });
 
@@ -152,14 +175,14 @@ test("does not accept pending or dismissed reviews", () => {
 
 test("does not accept missing, null, or unknown review states", () => {
   const result = run({
-    responses: [
-      JSON.stringify([
+    reviews: [
+      [
         [
           review({ id: 20, state: undefined }),
           review({ id: 21, state: null }),
           review({ id: 22, state: "FUTURE_STATE" }),
         ],
-      ]),
+      ],
     ],
   });
 
@@ -169,11 +192,20 @@ test("does not accept missing, null, or unknown review states", () => {
 
 test("accepts every known submitted review state", () => {
   for (const state of ["COMMENTED", "APPROVED", "CHANGES_REQUESTED"]) {
-    const result = run({ responses: [JSON.stringify([[review({ state })]])] });
+    const result = run({ reviews: [[[review({ state })]]] });
 
     assert.equal(result.code, 0, `${state}: ${result.stderr}`);
     assert.equal(result.output.reviewed, "true", state);
   }
+});
+
+test("does not query pull request reactions because they are not bound to a head SHA", () => {
+  const result = run();
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.calls, 1);
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
 });
 
 test("falls back with an explicit unknown-status reason when GitHub cannot be queried", () => {

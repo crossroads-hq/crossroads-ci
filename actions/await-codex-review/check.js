@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
 const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
+const CODEX_USER_ID = 199175422;
 const SUBMITTED_STATES = new Set(["COMMENTED", "APPROVED", "CHANGES_REQUESTED"]);
 
 function fail(message) {
@@ -75,6 +76,7 @@ while (true) {
 
   const match = result.reviews.find(
     (review) =>
+      review?.user?.id === CODEX_USER_ID &&
       review?.user?.login === CODEX_LOGIN &&
       review?.user?.type === "Bot" &&
       review?.commit_id === process.env.HEAD_SHA &&
