@@ -158,6 +158,20 @@ test("accepts the official Codex clean-review comment for the current head", () 
   });
 });
 
+test("accepts an official clean verdict with a varying same-line suffix", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        body: "Codex Review: Didn't find any major issues. Nice work!\n\n**Reviewed commit:** `0123456789`",
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-clean-comment-found");
+});
+
 test("does not accept a Codex clean-review comment for an older head", () => {
   const result = run({
     comments: [[[

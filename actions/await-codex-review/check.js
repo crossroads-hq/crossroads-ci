@@ -85,7 +85,7 @@ function isCodexBot(user) {
 function reviewedCommit(body) {
   if (typeof body !== "string") return "";
   return body.match(
-    /^Codex Review: Didn't find any major issues\. :tada:\r?\n\r?\n\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`(?:\r?\n|$)/
+    /^Codex Review: Didn't find any major issues\.[^\r\n]*\r?\n\r?\n\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`(?:\r?\n|$)/
   )?.[1] || "";
 }
 
