@@ -1,5 +1,5 @@
 name: Await Codex review
-description: Wait for a Codex review or fresh clean reaction on the pull request's current head.
+description: Wait for a submitted Codex review on the pull request's current head.
 
 inputs:
   github-token:
@@ -16,7 +16,7 @@ inputs:
 
 outputs:
   reviewed:
-    description: Whether Codex produced a verified verdict for the current head.
+    description: Whether Codex submitted a review for the current head.
     value: ${{ steps.check.outputs.reviewed }}
   reason:
     description: Machine-readable reason for the result.
