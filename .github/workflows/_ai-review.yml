@@ -1,4 +1,7 @@
-# Reusable: Claude review for a pull request, deduplicated by head SHA.
+# Reusable: Codex-first AI review for a pull request, deduplicated by head SHA.
+# Codex automatic review is triggered by the GitHub integration. This workflow
+# waits for its current-head verdict, then runs Claude only when no verified
+# Codex review arrives within the bounded wait or the review state is unknown.
 #
 # Supersedes the _ai-review.yml retired 2026-08-24. That retirement recorded
 # "zero reviews produced across the comparison window"; the cause, in the same
@@ -52,10 +55,20 @@ on:
           multi-file PR (crossroads-ui#181, subtype error_max_turns), which
           fails the job AFTER the thorough path already worked. The budget
           bounds a runaway, not a diligent review, so it sits well above the
-          largest measured need; the 30-minute job timeout is the hard stop.
+          largest measured need; the 45-minute job timeout is the hard stop.
         type: number
         required: false
         default: 60
+      codex-wait-seconds:
+        description: >-
+          How long to wait for a submitted Codex review on the current head
+          before running Claude as the fallback reviewer. Zero checks once
+          without waiting. This is a delivery timeout, not a claim that Codex
+          tokens were exhausted; GitHub exposes no such verified signal. Must
+          be between 0 and 600 so Claude retains at least 35 minutes to run.
+        type: number
+        required: false
+        default: 180
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
@@ -66,7 +79,7 @@ permissions:
 
 jobs:
   review:
-    name: Claude review
+    name: AI review
     # The caller gates on its own conditions (draft, labels, site-only); this
     # workflow enforces the ones it can see. The fork check is load-bearing:
     # secrets must never reach a workflow definition a stranger controls.
@@ -89,7 +102,7 @@ jobs:
       # so comments are attributed to claude[bot]. Safe under the fork guard.
       id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     # PR-keyed and cancelling, not SHA-keyed and serialising. Any dedup that
     # reads shared state helps only AFTER a run finishes writing it; two runs
     # in flight for one SHA both see "not reviewed" and both pay. Keying on the
@@ -128,11 +141,13 @@ jobs:
       # login, and it stayed mintable at every step.
       #
       # A check run is minted by Actions for a job that actually executed.
-      # Nothing holding a token can forge one. The record and the work become
-      # the same object: this job succeeds only if a review reached the pull
-      # request (see the confirm step below), so a prior success IS proof of a
-      # delivered review, and a prior failure leaves nothing to skip on.
-      - name: Check whether this head SHA was already reviewed
+      # Nothing holding a token can forge one. But this job now has two green
+      # paths: a confirmed Claude delivery, or a Codex review that was present
+      # when the job ran. Codex reviews can later be dismissed, so a green job
+      # alone cannot safely dedup that path. Only the named Claude confirmation
+      # step is durable enough to skip directly; Codex-only successes flow to
+      # the verifier below and are revalidated against current review state.
+      - name: Check whether Claude already reviewed this head SHA
         id: dedup
         if: steps.changes.outputs.reviewable == 'true'
         env:
@@ -145,7 +160,7 @@ jobs:
           # Scoped to the CALLER'S OWN WORKFLOW FILE, not to any check run that
           # happens to carry this job's name. A check run records no workflow
           # path -- measured: name and app only -- so matching on the name
-          # alone accepted a job called "Claude review" anywhere in the
+          # alone accepted a job called "AI review" anywhere in the
           # repository, including one a pull request adds in a workflow of its
           # own. It could succeed in seconds and the real review would skip:
           # the same tamper class as the comment marker this replaced, one
@@ -163,24 +178,37 @@ jobs:
           wf_path="${wf_path#*/}"         # repo/.github/workflows/x.yml
           wf_path="${wf_path#*/}"         # .github/workflows/x.yml
 
-          prior=0
+          prior_claude=0
           for rid in $(gh api "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
               --paginate --slurp \
               | jq -r --arg p "$wf_path" '.[].workflow_runs[] | select(.path == $p) | .id'); do
             n="$(gh api "repos/${REPO}/actions/runs/${rid}/jobs" --paginate --slurp \
-              | jq '[.[].jobs[] | select((.name | endswith("Claude review")) and .conclusion == "success")] | length')"
-            prior=$((prior + n))
+              | jq '[.[].jobs[]
+                       | select((.name | endswith("AI review")) and .conclusion == "success")
+                       | select(any(.steps[]?;
+                           .name == "Confirm a review actually reached the pull request" and
+                           .conclusion == "success"))]
+                    | length')"
+            prior_claude=$((prior_claude + n))
           done
 
-          if [ "${prior:-0}" -gt 0 ]; then
-            echo "Head ${HEAD_SHA} already has a successful Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${prior_claude:-0}" -gt 0 ]; then
+            echo "Head ${HEAD_SHA} already has a confirmed Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout
+      - name: Wait for Codex review
+        id: codex
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        uses: tsviser/crossroads-ci/actions/await-codex-review@76a0f8da4205f8c15b87994c8a5678c1b5de2c5a # await-codex-review v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-seconds: ${{ inputs.codex-wait-seconds }}
+
+      - name: Checkout
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The PR HEAD, not the default merge ref. Dedup is keyed on
@@ -200,7 +228,7 @@ jobs:
       # it in the diff the reviewer is judging.
       - name: Resolve the review contract from the base ref
         id: contract
-        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -393,12 +421,12 @@ jobs:
 
       - name: Mark the time before the model runs
         id: stamp
-        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
         run: echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Claude review
         id: review
-        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
         uses: anthropics/claude-code-action@c81e3bc69d1b18badbb63ba39581218f02421678 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
@@ -472,6 +500,7 @@ jobs:
         if: >-
           steps.changes.outputs.reviewable == 'true' &&
           steps.dedup.outputs.skip == 'false' &&
+          steps.codex.outputs.reviewed != 'true' &&
           steps.review.outputs.conclusion == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -530,7 +559,7 @@ jobs:
       # means reviewed. The retired workflow reported green while reviewing
       # nothing for a month; silence is the failure mode to catch.
       - name: Report review outcome
-        if: ${{ !cancelled() && steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' }}
+        if: ${{ !cancelled() && steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true' }}
         env:
           CONCLUSION: ${{ steps.review.outputs.conclusion }}
         run: |

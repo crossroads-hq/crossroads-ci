@@ -26,10 +26,17 @@ Here, the JSON profiles are the only copy.
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
+| `actions/await-codex-review` | Verifies that the official Codex bot submitted a review for the pull request's current head. Stale, pending, dismissed, or spoofed reviews do not suppress the fallback. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
-| `.github/workflows/_ai-review.yml` | Reusable: Claude review per head SHA, on every push. Reads the review contract from the **base** ref, so a PR cannot rewrite the rules it is judged by — which is what lets it review workflow changes instead of skipping them. Retired 2026-08-24 and rebuilt: the recorded "zero reviews" was the old anti-tampering guard skipping every candidate, not a verdict on the reviewer. |
+| `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
+
+A Codex thumbs-up reaction is intentionally not enough to suppress Claude: a
+reaction is not bound to a head SHA and can remain after another push. Only a
+submitted, non-dismissed Codex review for the current head is treated as a
+verified verdict. A clean reaction-only Codex pass therefore takes the
+conservative Claude fallback path.
 
 ## Usage
 
@@ -49,7 +56,9 @@ jobs:
     uses: tsviser/crossroads-ci/.github/workflows/_supply-chain.yml@main
     with: { npm-audit: true }
 
-  # Requires the caller workflow to fire on `synchronize`, or the reviewer
+  # Enable Codex automatic reviews for the repository in ChatGPT first. This
+  # workflow observes the resulting GitHub review; it does not trigger Codex.
+  # Requires the caller workflow to fire on `synchronize`, or the reviewers
   # only ever sees a pull request's opening state. GitHub's DEFAULT types are
   # [opened, synchronize, reopened] — synchronize is already there, so a caller
   # with no `types:` needs no change. `ready_for_review` is NOT a default: add
@@ -71,6 +80,10 @@ jobs:
       pull-requests: write
       actions: read         # head-SHA dedup reads /actions/runs and its jobs
       id-token: write
+    # Optional: defaults to 180. This is a delivery wait, not a token-exhaustion
+    # detector; GitHub does not expose Codex quota state to this workflow.
+    with:
+      codex-wait-seconds: 180
     secrets:
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
