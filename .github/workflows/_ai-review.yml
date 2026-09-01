@@ -1,7 +1,7 @@
 # Reusable: Codex-first AI review for a pull request, deduplicated by head SHA.
 # Codex automatic review is triggered by the GitHub integration. This workflow
-# waits for its current-head verdict, then runs Claude only when no verified
-# Codex review arrives within the bounded wait or the review state is unknown.
+# waits for its current-head verdict, then runs Claude Sonnet only when no
+# verified Codex verdict arrives within the bounded wait or its state is unknown.
 #
 # Supersedes the _ai-review.yml retired 2026-08-24. That retirement recorded
 # "zero reviews produced across the comparison window"; the cause, in the same
@@ -61,7 +61,7 @@ on:
         default: 60
       codex-wait-seconds:
         description: >-
-          How long to wait for a submitted Codex review on the current head
+          How long to wait for a verified Codex verdict on the current head
           before running Claude as the fallback reviewer. Zero checks once
           without waiting. This is a delivery timeout, not a claim that Codex
           tokens were exhausted; GitHub exposes no such verified signal. Must
@@ -202,7 +202,7 @@ jobs:
       - name: Wait for Codex review
         id: codex
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
-        uses: tsviser/crossroads-ci/actions/await-codex-review@76a0f8da4205f8c15b87994c8a5678c1b5de2c5a # await-codex-review v1
+        uses: tsviser/crossroads-ci/actions/await-codex-review@2c584172e1b6cb57f0996b2f005668387c1d7645 # await-codex-review v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-seconds: ${{ inputs.codex-wait-seconds }}
@@ -444,6 +444,7 @@ jobs:
           # No --add-dir: the contract is inlined into the prompt, so nothing
           # reads it from disk and the grant only widened the readable surface.
           claude_args: |
+            --model sonnet
             --max-turns ${{ inputs.max-turns }}
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
           prompt: |
