@@ -6,7 +6,7 @@ inputs:
     description: Token used to read pull request reviews.
     required: true
   wait-seconds:
-    description: Maximum number of seconds to wait before allowing the fallback reviewer.
+    description: Maximum seconds to wait before allowing fallback; must be between 0 and 600.
     required: false
     default: "600"
   poll-seconds:

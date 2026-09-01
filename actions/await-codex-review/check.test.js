@@ -150,6 +150,32 @@ test("does not accept pending or dismissed reviews", () => {
   assert.equal(result.output.reviewed, "false");
 });
 
+test("does not accept missing, null, or unknown review states", () => {
+  const result = run({
+    responses: [
+      JSON.stringify([
+        [
+          review({ id: 20, state: undefined }),
+          review({ id: 21, state: null }),
+          review({ id: 22, state: "FUTURE_STATE" }),
+        ],
+      ]),
+    ],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("accepts every known submitted review state", () => {
+  for (const state of ["COMMENTED", "APPROVED", "CHANGES_REQUESTED"]) {
+    const result = run({ responses: [JSON.stringify([[review({ state })]])] });
+
+    assert.equal(result.code, 0, `${state}: ${result.stderr}`);
+    assert.equal(result.output.reviewed, "true", state);
+  }
+});
+
 test("falls back with an explicit unknown-status reason when GitHub cannot be queried", () => {
   const result = run({ failGh: true });
 
@@ -167,4 +193,11 @@ test("rejects invalid wait configuration instead of looping unpredictably", () =
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /WAIT_SECONDS must be a non-negative integer/);
+});
+
+test("caps the wait so the Claude fallback retains its runtime budget", () => {
+  const result = run({ wait: "601" });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /WAIT_SECONDS must not exceed 600/);
 });

@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
 const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
+const SUBMITTED_STATES = new Set(["COMMENTED", "APPROVED", "CHANGES_REQUESTED"]);
 
 function fail(message) {
   console.error(message);
@@ -56,6 +57,7 @@ for (const name of ["REPO", "PR", "HEAD_SHA", "GITHUB_OUTPUT", "GITHUB_STEP_SUMM
 
 const waitSeconds = integer("WAIT_SECONDS", { allowZero: true });
 const pollSeconds = integer("POLL_SECONDS", { allowZero: false });
+if (waitSeconds > 600) fail("WAIT_SECONDS must not exceed 600.");
 let remaining = waitSeconds;
 
 while (true) {
@@ -77,8 +79,7 @@ while (true) {
       review?.user?.type === "Bot" &&
       review?.commit_id === process.env.HEAD_SHA &&
       review?.submitted_at &&
-      review?.state !== "PENDING" &&
-      review?.state !== "DISMISSED"
+      SUBMITTED_STATES.has(review?.state)
   );
 
   if (match) {
