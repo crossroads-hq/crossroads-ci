@@ -26,7 +26,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
-| `actions/await-codex-review` | Verifies that the exact official Codex account submitted a review for the pull request's current head. Stale, pending, dismissed, or spoofed reviews do not suppress the fallback. |
+| `actions/await-codex-review` | Verifies that the exact official Codex account produced a formal review or structured clean-review comment for the pull request's current head. Abbreviated reviewed-commit markers are resolved to a unique full Git object ID before comparison; stale, ambiguous, pending, dismissed, or spoofed evidence does not suppress the fallback. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
 | `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. |
@@ -34,9 +34,10 @@ Here, the JSON profiles are the only copy.
 
 A Codex thumbs-up reaction never suppresses Claude: reactions carry no head SHA,
 and an older review can finish after a newer push and leave its reaction late.
-Only a submitted, non-dismissed review from the exact official Codex account for
-the current head is treated as a verified verdict. A clean reaction-only Codex
-pass therefore takes the lower-cost Claude Sonnet fallback path.
+Verified evidence is either a submitted, non-dismissed formal review for the
+current head or the exact official Codex bot's structured clean-review comment
+whose reviewed-commit marker resolves uniquely to the current head. Other comments and
+reaction-only results take the lower-cost Claude Sonnet fallback path.
 
 ## Usage
 
@@ -80,10 +81,10 @@ jobs:
       pull-requests: write
       actions: read         # head-SHA dedup reads /actions/runs and its jobs
       id-token: write
-    # Optional: defaults to 180. This is a delivery wait, not a token-exhaustion
+    # Optional: defaults to 300. This is a delivery wait, not a token-exhaustion
     # detector; GitHub does not expose Codex quota state to this workflow.
     with:
-      codex-wait-seconds: 180
+      codex-wait-seconds: 300
     secrets:
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
