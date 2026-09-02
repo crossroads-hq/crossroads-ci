@@ -647,12 +647,17 @@ jobs:
             echo "Reviewer emitted no conclusion, but a review reached the pull request; treating as reviewed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          # An empty conclusion has three causes that need different actions,
+          # An empty conclusion has several causes that need different actions,
           # and naming the wrong one costs an investigation. This step runs
           # under !cancelled(), so it is reached even when the reviewer never
           # started -- `steps.review.outcome` is what separates the cases.
-          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" != "success" ] \
-            && [ "$REVIEW_OUTCOME" != "failure" ]; then
+          #
+          # Each outcome is matched by NAME, and anything unrecognised falls to
+          # the catch-all rather than borrowing a neighbour's diagnosis. An
+          # earlier draft made this branch the default ("not success and not
+          # failure"), which would have swallowed `cancelled` and told the
+          # reader nothing ran when in fact the review had.
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "skipped" ]; then
             # Skipped: an earlier step in this job failed, so the reviewer was
             # never invoked. Nothing was reviewed and no turn budget was spent.
             #
@@ -674,7 +679,17 @@ jobs:
             echo "Reviewer never started (step ${REVIEW_OUTCOME}); fix the earlier red step in this job. Treat this PR as unreviewed." >&2
             exit 1
           fi
-          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "failure" ]; then
+          # `cancelled` belongs here, not with the never-started case. Inside
+          # this step it can only mean the review step hit its own
+          # `timeout-minutes`: a cancellation of the JOB would make
+          # `cancelled()` true and skip this step altogether, so a cancelled
+          # review step that we are still here to report on was stopped
+          # individually. Whether a step timeout surfaces as `failure` or
+          # `cancelled` is the runner's business; both mean the reviewer
+          # started and was cut off, so both take the same branch and the
+          # routing does not depend on knowing which.
+          if [ -z "$CONCLUSION" ] \
+            && { [ "$REVIEW_OUTCOME" = "failure" ] || [ "$REVIEW_OUTCOME" = "cancelled" ]; }; then
             # Ran and died mid-review. Saying "produced no conclusion" sent
             # three separate investigations looking for a broken output capture
             # when the cause was error_max_turns each time, with findings
@@ -702,7 +717,7 @@ jobs:
             echo "Reviewer step did not finish (no conclusion); see the Claude review step. Treat this PR as unreviewed." >&2
             exit 1
           fi
-          if [ -z "$CONCLUSION" ]; then
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "success" ]; then
             # Succeeded, but no comment, review or inline comment appeared.
             # This is the silence the guard exists to catch: a green job over a
             # pull request nobody reviewed.
@@ -713,6 +728,19 @@ jobs:
               echo "comment on this PR, so there is no evidence it reviewed anything."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "Reviewer finished but posted nothing; treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          if [ -z "$CONCLUSION" ]; then
+            # Unrecognised outcome. Report the value and assert no cause: a
+            # guess here is the misdiagnosis this whole step exists to avoid.
+            {
+              echo "### Claude review outcome not recognised"
+              echo
+              echo "The reviewer step reported \`${REVIEW_OUTCOME}\` with no conclusion,"
+              echo "which this check has no diagnosis for. Read the **Claude review**"
+              echo "step's log directly. Treat this PR as UNREVIEWED."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer outcome '${REVIEW_OUTCOME}' with no conclusion is unrecognised; treat this PR as unreviewed." >&2
             exit 1
           fi
           echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
