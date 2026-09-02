@@ -595,13 +595,29 @@ jobs:
             echo "Reviewer emitted no conclusion, but a review reached the pull request; treating as reviewed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [ -z "$CONCLUSION" ]; then
-            # Empty means the review step itself did not finish, so the action
-            # never set its output -- not that a finished reviewer stayed
-            # silent. Saying "produced no conclusion" sent three separate
-            # investigations looking for a broken output capture when the cause
-            # was error_max_turns each time, with findings already posted on the
-            # pull request. Name the step to read and the likeliest cause.
+          # An empty conclusion has three causes that need different actions,
+          # and naming the wrong one costs an investigation. This step runs
+          # under !cancelled(), so it is reached even when the reviewer never
+          # started -- `steps.review.outcome` is what separates the cases.
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" != "success" ] \
+            && [ "$REVIEW_OUTCOME" != "failure" ]; then
+            # Skipped: an earlier step in this job failed, so the reviewer was
+            # never invoked. Nothing was reviewed and no turn budget was spent.
+            {
+              echo "### Claude review never started"
+              echo
+              echo "The reviewer step was \`${REVIEW_OUTCOME}\`, so an earlier step in"
+              echo "this job failed — checkout or contract resolution. Fix that step;"
+              echo "the turn budget is not involved and nothing was reviewed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer never started (step ${REVIEW_OUTCOME}); fix the earlier failing step. Treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "failure" ]; then
+            # Ran and died mid-review. Saying "produced no conclusion" sent
+            # three separate investigations looking for a broken output capture
+            # when the cause was error_max_turns each time, with findings
+            # already posted on the PR. Name the step and the likeliest cause.
             {
               echo "### Claude review did not finish"
               echo
@@ -611,6 +627,19 @@ jobs:
               echo "any findings it did post are incomplete — raise \`max-turns\`."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "Reviewer step did not finish (no conclusion); see the Claude review step. Treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          if [ -z "$CONCLUSION" ]; then
+            # Succeeded, but no comment, review or inline comment appeared.
+            # This is the silence the guard exists to catch: a green job over a
+            # pull request nobody reviewed.
+            {
+              echo "### Claude review posted nothing"
+              echo
+              echo "The reviewer step succeeded but left no comment, review or inline"
+              echo "comment on this PR, so there is no evidence it reviewed anything."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer finished but posted nothing; treat this PR as unreviewed." >&2
             exit 1
           fi
           echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
