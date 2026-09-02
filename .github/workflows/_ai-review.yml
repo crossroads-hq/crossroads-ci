@@ -72,13 +72,26 @@ on:
           head before running Claude as the fallback reviewer. Zero checks once
           without waiting. This is a delivery timeout, not a claim that Codex
           tokens were exhausted; GitHub exposes no such verified signal. Must
-          be between 0 and 600, which keeps the review step's own 30-minute
-          bound clear of the 45-minute job timeout even at the longest wait.
+          be between 0 and 600, which keeps the review step's own
+          `review-timeout-minutes` bound clear of the 45-minute job timeout
+          even at the longest wait.
         type: number
         required: false
         # PR #20 measured a Codex review arriving about 190 seconds after the
         # wait began, just beyond the former 180-second default.
         default: 300
+      review-timeout-minutes:
+        description: >-
+          Wall-clock bound on the review step itself, in minutes. Separate from
+          the job's own `timeout-minutes` on purpose: a job timeout CANCELS the
+          job, which skips the step that reports why, so the run dies with no
+          explanation. A step timeout fails only that step and leaves the
+          reporting intact. Keep it above the turn budget's expected wall-clock
+          cost, so `max-turns` stays the ordinary bound, and far enough below
+          the job timeout that this fires first.
+        type: number
+        required: false
+        default: 30
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
@@ -451,13 +464,24 @@ jobs:
         # summary at all. A step timeout fails only this step, so the reporting
         # step still runs and the "did not finish" branch names it.
         #
-        # 30 sits between the two bounds it has to respect. Above turn
-        # exhaustion: 120 turns at the measured ~6 turns/min is about 20
+        # The default sits between the two bounds it has to respect. Above
+        # turn exhaustion: 120 turns at the measured ~6 turns/min is about 20
         # minutes, so the budget still binds first and `error_max_turns` stays
-        # the ordinary diagnosis. Below the job ceiling even at the worst legal
-        # wait: 10 minutes of `codex-wait-seconds` plus 30 here plus checkout,
-        # contract and confirmation leaves the 45-minute job timeout unreached.
-        timeout-minutes: 30
+        # the ordinary diagnosis. Below the job ceiling: the worst legal
+        # `codex-wait-seconds` is 10 minutes, and everything else before the
+        # reviewer -- change detection, head-SHA dedup, checkout at
+        # fetch-depth 0, contract resolution -- was MEASURED at 5-9s on
+        # crossroads-ci and 8-12s on crossroads-ui, the larger consumer, over
+        # three runs each. So the worst case is about 10 + 30 + 0.2 = 40.2
+        # minutes against a 45-minute job timeout.
+        #
+        # That margin is roughly 5 minutes and it is an assumption, not a
+        # guarantee: dedup paginates every workflow run for the head SHA and
+        # checkout scales with history, so a repository with far more CI churn
+        # or history could grow the overhead. What would break it is those
+        # steps costing minutes rather than seconds; re-measure before raising
+        # this default or the Codex wait.
+        timeout-minutes: ${{ inputs.review-timeout-minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
@@ -635,6 +659,10 @@ jobs:
           CONCLUSION: ${{ steps.review.outputs.conclusion }}
           REVIEW_OUTCOME: ${{ steps.review.outcome }}
           POSTED: ${{ steps.posted.outcome }}
+          # Interpolated, never retyped: a diagnostic that misdescribes its own
+          # trigger costs more than the failure it reports, and `max-turns` was
+          # retuned twice in this PR alone.
+          REVIEW_TIMEOUT: ${{ inputs.review-timeout-minutes }}
         run: |
           set -euo pipefail
           # An empty conclusion on a step that succeeded is not evidence of a
@@ -731,7 +759,7 @@ jobs:
               echo
               echo "- \`error_max_turns\` — the turn budget ran out mid-review."
               echo "  Raise \`max-turns\`."
-              echo "- cancelled at 30 minutes — the step's \`timeout-minutes\`, which"
+              echo "- cancelled at ${REVIEW_TIMEOUT} minutes — the step's \`timeout-minutes\`, which"
               echo "  is wall-clock. Raising \`max-turns\` will not help; the review"
               echo "  is running slower per turn than the budget assumes."
             } >> "$GITHUB_STEP_SUMMARY"
