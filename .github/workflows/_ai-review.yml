@@ -593,6 +593,37 @@ jobs:
             echo "Reviewer reported success but posted nothing; treating as unreviewed." >&2
             exit 1
           fi
+          # A PR-LEVEL verdict, not merely "something was posted". The prompt
+          # ends "ALWAYS finish by posting exactly one summary comment", so that
+          # comment is the reviewer's own last action and its presence is the
+          # closest thing this job has to proof the review ran to completion.
+          #
+          # Counting any artefact was too weak: it rests entirely on truncation
+          # always surfacing as outcome=failure, which is claude-code-action's
+          # internal exit-code behaviour and not something this workflow can
+          # enforce. A run cut off after posting a few inline findings but
+          # before its summary would have exited 0, counted those findings as
+          # evidence, and been recorded as reviewed -- the truncated review
+          # passing that this guard exists to prevent.
+          #
+          # Inline comments alone are therefore not enough. Reviews count
+          # alongside comments because the verdict is PR-level either way; in
+          # agent mode only `gh pr comment` is granted, so today this is the
+          # comments query, and a future version granting a review tool stays
+          # covered.
+          verdict=$((comments + reviews))
+          if [ "$verdict" -eq 0 ]; then
+            {
+              echo "### Claude review did not finish"
+              echo
+              echo "${inline} inline comment(s) reached this PR, but the summary"
+              echo "comment the prompt always ends with never arrived, so the"
+              echo "reviewer stopped before its last step and what it posted is"
+              echo "partial. Treat this PR as UNREVIEWED."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer posted ${inline} inline comment(s) but no summary verdict; treating as unreviewed." >&2
+            exit 1
+          fi
           echo "Review reached the pull request (${total} artefact(s): ${comments} comment(s), ${reviews} review(s), ${inline} inline)." >> "$GITHUB_STEP_SUMMARY"
 
       # An early exit with no conclusion and no stated reason fails, so green
