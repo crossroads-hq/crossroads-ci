@@ -72,7 +72,8 @@ on:
           head before running Claude as the fallback reviewer. Zero checks once
           without waiting. This is a delivery timeout, not a claim that Codex
           tokens were exhausted; GitHub exposes no such verified signal. Must
-          be between 0 and 600 so Claude retains at least 35 minutes to run.
+          be between 0 and 600, which keeps the review step's own 30-minute
+          bound clear of the 45-minute job timeout even at the longest wait.
         type: number
         required: false
         # PR #20 measured a Codex review arriving about 190 seconds after the
@@ -443,6 +444,20 @@ jobs:
       - name: Claude review
         id: review
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
+        # Bounded HERE rather than only by the job's 45 minutes, because the two
+        # failures are not equivalent. A job timeout CANCELS the job, which makes
+        # `cancelled()` true and skips `Report review outcome` entirely -- the
+        # step built to name the cause never runs, and the job dies with no
+        # summary at all. A step timeout fails only this step, so the reporting
+        # step still runs and the "did not finish" branch names it.
+        #
+        # 30 sits between the two bounds it has to respect. Above turn
+        # exhaustion: 120 turns at the measured ~6 turns/min is about 20
+        # minutes, so the budget still binds first and `error_max_turns` stays
+        # the ordinary diagnosis. Below the job ceiling even at the worst legal
+        # wait: 10 minutes of `codex-wait-seconds` plus 30 here plus checkout,
+        # contract and confirmation leaves the 45-minute job timeout unreached.
+        timeout-minutes: 30
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
