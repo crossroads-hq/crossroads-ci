@@ -475,12 +475,20 @@ jobs:
         # three runs each. So the worst case is about 10 + 30 + 0.2 = 40.2
         # minutes against a 45-minute job timeout.
         #
+        # The steps AFTER the reviewer sit inside the same job timeout and
+        # were measured too, since an accounting that stops at the reviewer
+        # would protect the wrong interval: confirmation and reporting took 2s
+        # and 0s across three runs, on this pull request at 48 artefacts (8
+        # comments, 20 inline, 20 reviews) -- the volume its three paginated
+        # queries actually walk. Total non-review cost is therefore ~12s, and
+        # the worst case stands at about 40.2 minutes.
+        #
         # That margin is roughly 5 minutes and it is an assumption, not a
-        # guarantee: dedup paginates every workflow run for the head SHA and
-        # checkout scales with history, so a repository with far more CI churn
-        # or history could grow the overhead. What would break it is those
-        # steps costing minutes rather than seconds; re-measure before raising
-        # this default or the Codex wait.
+        # guarantee. Dedup paginates every workflow run for the head SHA,
+        # checkout scales with history, and the confirmation queries scale with
+        # comment volume. What would break it is any of those costing minutes
+        # rather than seconds; re-measure before raising this default or the
+        # Codex wait.
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
@@ -692,6 +700,26 @@ jobs:
           # requires the review step to have succeeded, so whenever this step
           # runs after a successful review, `posted` ran too: it is success or
           # failure here, never skipped.
+          # Ordered ahead of the evidence deference below, because a reported
+          # failure is the more specific fact. `posted` only runs when the STEP
+          # succeeded, but the action's conclusion can independently be
+          # `failure` -- that split is why this file tracks the two separately
+          # -- and a reviewer that errored out usually posted nothing, so the
+          # evidence check fails too. Deferring first sent the reader to
+          # `posted`'s "most likely the reviewer has no tool able to comment",
+          # a plausible-but-wrong lead when the real cause was a reported
+          # failure such as error_max_turns.
+          if [ -n "$CONCLUSION" ] && [ "$CONCLUSION" != "success" ]; then
+            {
+              echo "### Claude review reported a failure"
+              echo
+              echo "The reviewer finished with conclusion \`${CONCLUSION}\`. Open the"
+              echo "**Claude review** step's log for the reason; if it also posted"
+              echo "nothing, that is a consequence, not the cause."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "The reviewer reported a failure (conclusion: ${CONCLUSION}); treat this PR as unreviewed." >&2
+            exit 1
+          fi
           if [ "$POSTED" = "failure" ]; then
             echo "Review evidence check failed; see 'Confirm a review actually reached the pull request' above. Treat this PR as unreviewed." >&2
             exit 1
@@ -779,8 +807,6 @@ jobs:
             echo "Reviewer outcome '${REVIEW_OUTCOME}' with no conclusion is unrecognised; treat this PR as unreviewed." >&2
             exit 1
           fi
+          # Every other value was handled above, so reaching here means
+          # conclusion=success with the evidence check satisfied.
           echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
-          [ "$CONCLUSION" = "success" ] || {
-            echo "The reviewer reported a failure; treat this PR as unreviewed." >&2
-            exit 1
-          }
