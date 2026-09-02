@@ -647,6 +647,27 @@ jobs:
             echo "Reviewer emitted no conclusion, but a review reached the pull request; treating as reviewed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # The evidence check already wrote the specific reason it failed --
+          # nothing posted at all, or inline findings with no summary verdict --
+          # so this step points at that message instead of composing a second
+          # one. Restating it generically put two contradicting paragraphs in
+          # the same run summary: "left no comment, review or inline comment"
+          # printed directly beneath "N inline comment(s) reached this PR".
+          #
+          # Deferring also covers a non-empty conclusion. `posted` failing while
+          # the action reports `success` used to match no branch at all and fall
+          # through to "Claude review ran", asserting a clean outcome beside the
+          # real failure. A review with no verdict is unreviewed whatever the
+          # action says about itself.
+          #
+          # `posted` shares this step's own `if:` conditions and additionally
+          # requires the review step to have succeeded, so whenever this step
+          # runs after a successful review, `posted` ran too: it is success or
+          # failure here, never skipped.
+          if [ "$POSTED" = "failure" ]; then
+            echo "Review evidence check failed; see 'Confirm a review actually reached the pull request' above. Treat this PR as unreviewed." >&2
+            exit 1
+          fi
           # An empty conclusion has several causes that need different actions,
           # and naming the wrong one costs an investigation. This step runs
           # under !cancelled(), so it is reached even when the reviewer never
@@ -715,19 +736,6 @@ jobs:
               echo "  is running slower per turn than the budget assumes."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "Reviewer step did not finish (no conclusion); see the Claude review step. Treat this PR as unreviewed." >&2
-            exit 1
-          fi
-          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "success" ]; then
-            # Succeeded, but no comment, review or inline comment appeared.
-            # This is the silence the guard exists to catch: a green job over a
-            # pull request nobody reviewed.
-            {
-              echo "### Claude review posted nothing"
-              echo
-              echo "The reviewer step succeeded but left no comment, review or inline"
-              echo "comment on this PR, so there is no evidence it reviewed anything."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "Reviewer finished but posted nothing; treat this PR as unreviewed." >&2
             exit 1
           fi
           if [ -z "$CONCLUSION" ]; then
