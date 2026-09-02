@@ -26,31 +26,31 @@
 # Blank lines and comments are ignored.
 
 # Control plane — this repository governs itself once its CI gate exists
-tsviser/crossroads-ci                 full       main
+crossroads-hq/crossroads-ci                 full       main
 
 # Tier A — published npm packages
-tsviser/storybook-live-code-sandbox   full+tags  main
-tsviser/storybook-live-code-addon     full+tags  main
+crossroads-hq/storybook-live-code-sandbox   full+tags  main
+crossroads-hq/storybook-live-code-addon     full+tags  main
 
 # Tier B — private applications
-tsviser/crossroads-ui                 full       main
-tsviser/crossroads-evolution          full       main
+crossroads-hq/crossroads-ui                 full       main
+crossroads-hq/crossroads-evolution          full       main
 
 # Tier C — docs / contract repositories
-tsviser/crossroads-agent-system       full       main
+crossroads-hq/crossroads-agent-system       full       main
 # Vault sanity gate (conflict markers + JSON validity) added 2026-08-23 once
 # Actions billing cleared; the aggregate check name matches the fleet, so the
 # full profile applies. NOTE: full ends direct pushes to the vault branch —
 # every Obsidian sync now lands via a pull request. If that turns out to be
 # unlivable, flip this back to `minimal` and re-run apply-fleet; the gate
 # workflow keeps running either way. Non-standard default branch.
-tsviser/crossroads-os                 full       crossroads-os-v2
+crossroads-hq/crossroads-os                 full       crossroads-os-v2
 
 # Tier D — live but CI-less. `minimal` until archived or promoted.
-tsviser/evolution-demo                minimal    main
-tsviser/Product-management-OS         minimal    main
-tsviser/resume-adaptation-assistant   minimal    main
-tsviser/designer-skills               minimal    main
+crossroads-hq/evolution-demo                minimal    main
+crossroads-hq/Product-management-OS         minimal    main
+crossroads-hq/resume-adaptation-assistant   minimal    main
+crossroads-hq/designer-skills               minimal    main
 # Excluded, with reasons:
 #
 #   storybook-live-code — fork of storybookjs/storybook. Its workflows and

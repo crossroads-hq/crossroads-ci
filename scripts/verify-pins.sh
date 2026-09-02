@@ -46,7 +46,13 @@ fleet_file="${1:-governance/repositories.txt}"
 base="${BASE:-origin/main}"
 # Every consumer reference has this form; the local `./actions/gate` this
 # repository's own ci.yml uses is deliberately not matched.
-control_plane="tsviser/crossroads-ci"
+control_plane="crossroads-hq/crossroads-ci"
+# The pre-migration owner. GitHub redirects it for now, so such a pin still
+# resolves -- but only until any repository reclaims the old name. Matched so
+# a stale pin is REPORTED rather than silently falling out of this report,
+# which would read as "no control-plane pins" -- the green-having-checked-
+# nothing this script exists to prevent.
+legacy_control_plane="tsviser/crossroads-ci"
 
 command -v gh >/dev/null || { echo "gh CLI is required" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || {
@@ -224,13 +230,23 @@ while read -r repo profile branch _; do
     # dependency, and counting one as a pin sends someone chasing prose.
     refs="$(printf '%s\n' "$body" \
       | grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' \
-      | grep -ohE "${control_plane}/[A-Za-z0-9._/-]+@[A-Za-z0-9._/-]+" \
+      | grep -ohE "(${control_plane}|${legacy_control_plane})/[A-Za-z0-9._/-]+@[A-Za-z0-9._/-]+" \
       | sort -u || true)"
 
     while IFS= read -r pin; do
       [ -n "$pin" ] || continue
       found=1
-      component="${pin#"${control_plane}/"}"
+      case "$pin" in
+        "${legacy_control_plane}"/*)
+          component="${pin#"${legacy_control_plane}/"}"
+          printf '    %-42s %-10.8s STALE OWNER: pins %s, resolving by redirect  [%s]\n' \
+            "${component%@*}" "${pin##*@}" "$legacy_control_plane" "$wf"
+          behind_total=$((behind_total + 1))
+          ;;
+        *)
+          component="${pin#"${control_plane}/"}"
+          ;;
+      esac
       report_pin "${component%@*}" "${pin##*@}" "$wf"
     done <<<"$refs"
   done <<<"$workflows"
