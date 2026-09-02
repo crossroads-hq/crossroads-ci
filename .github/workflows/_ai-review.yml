@@ -508,11 +508,19 @@ jobs:
       # next push retries instead of inheriting a false "already reviewed".
       - name: Confirm a review actually reached the pull request
         id: posted
+        # Gated on the step's own outcome, not on its `conclusion` output. The
+        # output has been observed empty on a step that SUCCEEDED and whose
+        # reviewer had posted comments (crossroads-ui#214). Gating the evidence
+        # check on it meant the one check able to vindicate that run was the
+        # one skipped, and the job then failed for the missing output while the
+        # review sat on the pull request. Counting artefacts is the stronger
+        # signal anyway: it reads what reached the PR rather than what the
+        # action said about itself.
         if: >-
           steps.changes.outputs.reviewable == 'true' &&
           steps.dedup.outputs.skip == 'false' &&
           steps.codex.outputs.reviewed != 'true' &&
-          steps.review.outputs.conclusion == 'success'
+          steps.review.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -573,8 +581,20 @@ jobs:
         if: ${{ !cancelled() && steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true' }}
         env:
           CONCLUSION: ${{ steps.review.outputs.conclusion }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+          POSTED: ${{ steps.posted.outcome }}
         run: |
           set -euo pipefail
+          # An empty conclusion on a step that succeeded is not evidence of a
+          # missing review -- crossroads-ui#214 had one, with the reviewer's
+          # comments sitting on the pull request. Where the artefact count
+          # already confirmed a review reached the PR, that is the stronger
+          # signal and it stands on its own; the conclusion output is a claim
+          # the action makes about itself.
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "success" ] && [ "$POSTED" = "success" ]; then
+            echo "Reviewer emitted no conclusion, but a review reached the pull request; treating as reviewed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ -z "$CONCLUSION" ]; then
             # Empty means the review step itself did not finish, so the action
             # never set its output -- not that a finished reviewer stayed
