@@ -609,14 +609,23 @@ jobs:
             && [ "$REVIEW_OUTCOME" != "failure" ]; then
             # Skipped: an earlier step in this job failed, so the reviewer was
             # never invoked. Nothing was reviewed and no turn budget was spent.
+            #
+            # The cause is named generically on purpose. An earlier draft said
+            # "checkout or contract resolution", which is not exhaustive: `Wait
+            # for Codex review` runs before Checkout and carries no `if:`, so
+            # its failure skips the reviewer with this same signature while
+            # leaving `steps.codex.outputs.reviewed` unset, which keeps this
+            # step running. Enumerating steps here would point the reader at
+            # the wrong one -- the misdiagnosis this whole change removes.
             {
               echo "### Claude review never started"
               echo
               echo "The reviewer step was \`${REVIEW_OUTCOME}\`, so an earlier step in"
-              echo "this job failed — checkout or contract resolution. Fix that step;"
-              echo "the turn budget is not involved and nothing was reviewed."
+              echo "this job failed and the reviewer was never invoked. Find the red"
+              echo "step above and fix that; the turn budget is not involved here,"
+              echo "and nothing was reviewed."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "Reviewer never started (step ${REVIEW_OUTCOME}); fix the earlier failing step. Treat this PR as unreviewed." >&2
+            echo "Reviewer never started (step ${REVIEW_OUTCOME}); fix the earlier red step in this job. Treat this PR as unreviewed." >&2
             exit 1
           fi
           if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "failure" ]; then
