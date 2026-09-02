@@ -506,6 +506,14 @@ jobs:
         # summary at all. A step timeout fails only this step, so the reporting
         # step still runs and the "did not finish" branch names it.
         #
+        # MEASURED, not assumed: whether a step timeout leaves `cancelled()`
+        # false is a documented ambiguity, and the whole reason for moving the
+        # bound here rests on it. A probe job (crossroads-ci run 33661371506,
+        # `timeout-minutes: 1` over a `sleep 180`) recorded the step timing out
+        # with outcome AND conclusion `failure`, and the following
+        # `if: !cancelled()` step running normally. So the premise holds, and a
+        # step timeout arrives as `failure` rather than `cancelled`.
+        #
         # The default sits between the two bounds it has to respect. Above
         # turn exhaustion: 120 turns at the measured ~6 turns/min is about 20
         # minutes, so the budget still binds first and `error_max_turns` stays
@@ -798,15 +806,14 @@ jobs:
             echo "Reviewer never started (step ${REVIEW_OUTCOME}); fix the earlier red step in this job. Treat this PR as unreviewed." >&2
             exit 1
           fi
-          # `cancelled` belongs here, not with the never-started case. Inside
-          # this step it can only mean the review step hit its own
-          # `timeout-minutes`: a cancellation of the JOB would make
-          # `cancelled()` true and skip this step altogether, so a cancelled
-          # review step that we are still here to report on was stopped
-          # individually. Whether a step timeout surfaces as `failure` or
-          # `cancelled` is the runner's business; both mean the reviewer
-          # started and was cut off, so both take the same branch and the
-          # routing does not depend on knowing which.
+          # `cancelled` belongs here, not with the never-started case. The
+          # probe cited on the review step measured a step timeout arriving as
+          # `failure`, so this is not the timeout path in practice -- but a
+          # cancelled review step we are still here to report on was stopped
+          # individually either way, since a JOB cancellation would make
+          # `cancelled()` true and skip this step altogether. Both values mean
+          # the reviewer started and was cut off, so both take this branch and
+          # the routing survives the runner changing its mind.
           if [ -z "$CONCLUSION" ] \
             && { [ "$REVIEW_OUTCOME" = "failure" ] || [ "$REVIEW_OUTCOME" = "cancelled" ]; }; then
             # Ran and died mid-review. Saying "produced no conclusion" sent
