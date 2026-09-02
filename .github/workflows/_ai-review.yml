@@ -53,13 +53,19 @@ on:
         description: >-
           Claude Code turn budget for one review. Measured: a one-file script
           diff took 14 turns; 25 was exhausted mid-review by a moderate
-          multi-file PR (crossroads-ui#181, subtype error_max_turns), which
-          fails the job AFTER the thorough path already worked. The budget
-          bounds a runaway, not a diligent review, so it sits well above the
-          largest measured need; the 45-minute job timeout is the hard stop.
+          multi-file PR (crossroads-ui#181, subtype error_max_turns); 60 was
+          exhausted the same way by a 45-file PR (crossroads-ui#210), which
+          burned the budget in 9m35s of a 45-minute job. Both times the budget
+          bound before the timeout did, and both times the reviewer had already
+          posted real findings — the run failed AFTER the thorough path worked,
+          reporting a reviewed PR as unreviewed. The budget bounds a runaway,
+          not a diligent review, so it sits well above the largest measured
+          need; the 45-minute job timeout is the hard stop. At the observed
+          ~6 turns per minute, 120 lands near 20 minutes and leaves the timeout
+          as the real bound, which is where the ceiling belongs.
         type: number
         required: false
-        default: 60
+        default: 120
       codex-wait-seconds:
         description: >-
           How long to wait for a verified Codex review result on the current
@@ -570,7 +576,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$CONCLUSION" ]; then
-            echo "The reviewer produced no conclusion; treat this PR as unreviewed." >&2
+            # Empty means the review step itself did not finish, so the action
+            # never set its output -- not that a finished reviewer stayed
+            # silent. Saying "produced no conclusion" sent three separate
+            # investigations looking for a broken output capture when the cause
+            # was error_max_turns each time, with findings already posted on the
+            # pull request. Name the step to read and the likeliest cause.
+            {
+              echo "### Claude review did not finish"
+              echo
+              echo "The reviewer step failed before reporting a conclusion, so this"
+              echo "PR is only partly reviewed. Open the **Claude review** step's log:"
+              echo "\`error_max_turns\` means it ran out of turn budget mid-review and"
+              echo "any findings it did post are incomplete — raise \`max-turns\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer step did not finish (no conclusion); see the Claude review step. Treat this PR as unreviewed." >&2
             exit 1
           fi
           echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
