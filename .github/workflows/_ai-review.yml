@@ -60,7 +60,7 @@ on:
           posted real findings — the run failed AFTER the thorough path worked,
           reporting a reviewed PR as unreviewed. The budget bounds a runaway,
           not a diligent review, so it sits well above the largest measured
-          need; the 45-minute job timeout is the hard stop. At the observed
+          need; the job timeout (`job-timeout-minutes`) is the hard stop. At the observed
           ~6 turns per minute, 120 lands near 20 minutes and leaves the timeout
           as the real bound, which is where the ceiling belongs.
         type: number
@@ -73,8 +73,9 @@ on:
           without waiting. This is a delivery timeout, not a claim that Codex
           tokens were exhausted; GitHub exposes no such verified signal. Must
           be between 0 and 600, which keeps the review step's own
-          `review-timeout-minutes` bound clear of the 45-minute job timeout
-          even at the longest wait.
+          `review-timeout-minutes` bound clear of the job timeout even at the
+          longest wait. The pre-flight budget check enforces that rather than
+          leaving it to these two descriptions agreeing.
         type: number
         required: false
         # PR #20 measured a Codex review arriving about 190 seconds after the
@@ -516,7 +517,7 @@ jobs:
       - name: Claude review
         id: review
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
-        # Bounded HERE rather than only by the job's 45 minutes, because the two
+        # Bounded HERE rather than only by `job-timeout-minutes`, because the two
         # failures are not equivalent. A job timeout CANCELS the job, which makes
         # `cancelled()` true and skips `Report review outcome` entirely -- the
         # step built to name the cause never runs, and the job dies with no
@@ -540,7 +541,10 @@ jobs:
         # fetch-depth 0, contract resolution -- was MEASURED at 5-9s on
         # crossroads-ci and 8-12s on crossroads-ui, the larger consumer, over
         # three runs each. So the worst case is about 10 + 30 + 0.2 = 40.2
-        # minutes against a 45-minute job timeout.
+        # minutes against the 45-minute default of `job-timeout-minutes`. That
+        # arithmetic is worked at the default deliberately: it is a measurement
+        # of one configuration, not a claim that holds for every override, and
+        # the pre-flight check is what actually enforces the relationship.
         #
         # The steps AFTER the reviewer sit inside the same job timeout and
         # were measured too, since an accounting that stops at the reviewer
