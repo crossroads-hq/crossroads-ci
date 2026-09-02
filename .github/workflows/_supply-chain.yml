@@ -123,7 +123,11 @@ jobs:
       # `gitleaks git` walks the full history fetched above -- the same "a
       # secret committed then reverted is still leaked" coverage as before;
       # the wrapper's PR-range bounding was an optimisation, not a scope.
-      # --redact keeps a real find out of a public log; exit code 1 on leaks
+      # --redact keeps a real find out of a public log, and -v prints each
+      # finding (rule, file, commit, fingerprint) WITH the secret redacted --
+      # without it gitleaks reports only a count, and the first real failure
+      # (crossroads-ui, a public-by-design PostHog key) had to be reproduced
+      # locally just to learn what was flagged. Exit code 1 on leaks
       # fails the job exactly as the wrapper did.
       - name: Scan for leaked credentials
         env:
@@ -136,4 +140,4 @@ jobs:
           (cd "${RUNNER_TEMP}" \
             && echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c - \
             && tar -xzf gitleaks.tar.gz gitleaks)
-          "${RUNNER_TEMP}/gitleaks" git --redact --no-banner --exit-code 1 .
+          "${RUNNER_TEMP}/gitleaks" git --redact -v --no-banner --exit-code 1 .
