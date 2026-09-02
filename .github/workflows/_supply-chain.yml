@@ -11,7 +11,7 @@
 # GitHub Advanced Security licence. Callers add one job:
 #
 #   supply-chain:
-#     uses: tsviser/crossroads-ci/.github/workflows/_supply-chain.yml@v1
+#     uses: crossroads-hq/crossroads-ci/.github/workflows/_supply-chain.yml@v1
 #     with: { npm-audit: true }
 name: Supply chain
 

@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Merge-queue entries. Without this trigger a queued PR waits for a
+  # "PR Validation" check that never starts and times out of the queue.
+  merge_group:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -30,8 +33,13 @@ jobs:
       # Job-level filters, not workflow-level paths-ignore: a docs-only PR
       # must still report PR Validation, with verify jobs skipped rather than
       # never scheduled. Same rationale as actions/detect-reviewable.
+      # Skipped on merge_group: paths-filter has no diff base there, and this
+      # job is a REQUIRED gate input -- a step failure would bounce every
+      # queued PR. The outputs go unread on that event anyway: both consumers
+      # below treat merge_group like push and run unconditionally.
       - name: Path filter
         id: filter
+        if: github.event_name != 'merge_group'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -47,6 +55,7 @@ jobs:
     needs: changes
     if: >-
       github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
       needs.changes.outputs.workflow == 'true'
     uses: ./.github/workflows/_workflow-lint.yml
 
@@ -55,6 +64,7 @@ jobs:
     needs: changes
     if: >-
       github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
       needs.changes.outputs.scripts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
