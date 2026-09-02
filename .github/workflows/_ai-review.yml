@@ -647,14 +647,26 @@ jobs:
             # Ran and died mid-review. Saying "produced no conclusion" sent
             # three separate investigations looking for a broken output capture
             # when the cause was error_max_turns each time, with findings
-            # already posted on the PR. Name the step and the likeliest cause.
+            # already posted on the PR.
+            #
+            # Two bounds now produce this signature, and they need opposite
+            # responses: the turn budget, and the step's own `timeout-minutes`
+            # added by this change. Both surface as outcome=failure with no
+            # conclusion, so the message asks the reader which one the log
+            # shows rather than asserting either. Raising `max-turns` for a
+            # wall-clock timeout would be the same misdiagnosis one bound over.
             {
               echo "### Claude review did not finish"
               echo
               echo "The reviewer step failed before reporting a conclusion, so this"
-              echo "PR is only partly reviewed. Open the **Claude review** step's log:"
-              echo "\`error_max_turns\` means it ran out of turn budget mid-review and"
-              echo "any findings it did post are incomplete — raise \`max-turns\`."
+              echo "PR is only partly reviewed and anything it posted is incomplete."
+              echo "Open the **Claude review** step's log and read which bound it hit:"
+              echo
+              echo "- \`error_max_turns\` — the turn budget ran out mid-review."
+              echo "  Raise \`max-turns\`."
+              echo "- cancelled at 30 minutes — the step's \`timeout-minutes\`, which"
+              echo "  is wall-clock. Raising \`max-turns\` will not help; the review"
+              echo "  is running slower per turn than the budget assumes."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "Reviewer step did not finish (no conclusion); see the Claude review step. Treat this PR as unreviewed." >&2
             exit 1
