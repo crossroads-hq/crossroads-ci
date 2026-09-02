@@ -80,6 +80,18 @@ on:
         # PR #20 measured a Codex review arriving about 190 seconds after the
         # wait began, just beyond the former 180-second default.
         default: 300
+      job-timeout-minutes:
+        description: >-
+          Ceiling for the whole job. Exposed as an input only so the pre-flight
+          budget check can read the same number the job is bounded by: Actions
+          gives a step no way to read its own job's `timeout-minutes`, so the
+          alternative is a second literal that drifts. Lowered without the
+          guard following, the guard would wave through budgets the job then
+          cancels -- which skips the step that reports why, the failure this
+          workflow is built to prevent.
+        type: number
+        required: false
+        default: 45
       review-timeout-minutes:
         description: >-
           Wall-clock bound on the review step itself, in minutes. Separate from
@@ -131,7 +143,9 @@ jobs:
       # so comments are attributed to claude[bot]. Safe under the fork guard.
       id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Read by the budget guard below through the same input, so the two cannot
+    # disagree.
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
     # PR-keyed and cancelling, not SHA-keyed and serialising. Any dedup that
     # reads shared state helps only AFTER a run finishes writing it; two runs
     # in flight for one SHA both see "not reviewed" and both pay. Keying on the
@@ -159,7 +173,10 @@ jobs:
         env:
           REVIEW_TIMEOUT: ${{ inputs.review-timeout-minutes }}
           CODEX_WAIT: ${{ inputs.codex-wait-seconds }}
-          JOB_TIMEOUT: 45
+          # The job's own ceiling, through the input it is set from -- not a
+          # second literal. A guard that measures against a stale copy of the
+          # bound is the drift this workflow keeps removing elsewhere.
+          JOB_TIMEOUT: ${{ inputs.job-timeout-minutes }}
           # Measured at ~12s total (change detection, dedup, checkout at
           # fetch-depth 0, contract resolution, confirmation, reporting); 2
           # minutes is that with an order of magnitude to spare.
