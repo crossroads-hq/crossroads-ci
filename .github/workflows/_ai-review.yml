@@ -849,13 +849,15 @@ jobs:
               echo
               echo "The reviewer step failed before reporting a conclusion, so this"
               echo "PR is only partly reviewed and anything it posted is incomplete."
-              echo "Open the **Claude review** step's log and read which bound it hit:"
+              echo "Both bounds end the step the same way, so its outcome does not"
+              echo "tell them apart. The **Claude review** log line does:"
               echo
               echo "- \`error_max_turns\` — the turn budget ran out mid-review."
               echo "  Raise \`max-turns\`."
-              echo "- cancelled at ${REVIEW_TIMEOUT} minutes — the step's \`timeout-minutes\`, which"
-              echo "  is wall-clock. Raising \`max-turns\` will not help; the review"
-              echo "  is running slower per turn than the budget assumes."
+              echo "- \`has timed out after ${REVIEW_TIMEOUT} minutes\` — the step's"
+              echo "  \`timeout-minutes\`, which is wall-clock. Raising \`max-turns\` will"
+              echo "  not help; the review is running slower per turn than the budget"
+              echo "  assumes."
               echo
               echo "Those two are the bounds this workflow sets, not the only ways to"
               echo "get here: any unhandled error in the action — a crash, an auth"
