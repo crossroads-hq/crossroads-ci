@@ -53,25 +53,58 @@ on:
         description: >-
           Claude Code turn budget for one review. Measured: a one-file script
           diff took 14 turns; 25 was exhausted mid-review by a moderate
-          multi-file PR (crossroads-ui#181, subtype error_max_turns), which
-          fails the job AFTER the thorough path already worked. The budget
-          bounds a runaway, not a diligent review, so it sits well above the
-          largest measured need; the 45-minute job timeout is the hard stop.
+          multi-file PR (crossroads-ui#181, subtype error_max_turns); 60 was
+          exhausted the same way by a 45-file PR (crossroads-ui#210), which
+          burned the budget in 9m35s of a 45-minute job. Both times the budget
+          bound before the timeout did, and both times the reviewer had already
+          posted real findings — the run failed AFTER the thorough path worked,
+          reporting a reviewed PR as unreviewed. The budget bounds a runaway,
+          not a diligent review, so it sits well above the largest measured
+          need; the job timeout (`job-timeout-minutes`) is the hard stop. At the observed
+          ~6 turns per minute, 120 lands near 20 minutes and leaves the timeout
+          as the real bound, which is where the ceiling belongs.
         type: number
         required: false
-        default: 60
+        default: 120
       codex-wait-seconds:
         description: >-
           How long to wait for a verified Codex review result on the current
           head before running Claude as the fallback reviewer. Zero checks once
           without waiting. This is a delivery timeout, not a claim that Codex
           tokens were exhausted; GitHub exposes no such verified signal. Must
-          be between 0 and 600 so Claude retains at least 35 minutes to run.
+          be between 0 and 600, which keeps the review step's own
+          `review-timeout-minutes` bound clear of the job timeout even at the
+          longest wait. The pre-flight budget check enforces that rather than
+          leaving it to these two descriptions agreeing.
         type: number
         required: false
         # PR #20 measured a Codex review arriving about 190 seconds after the
         # wait began, just beyond the former 180-second default.
         default: 300
+      job-timeout-minutes:
+        description: >-
+          Ceiling for the whole job. Exposed as an input only so the pre-flight
+          budget check can read the same number the job is bounded by: Actions
+          gives a step no way to read its own job's `timeout-minutes`, so the
+          alternative is a second literal that drifts. Lowered without the
+          guard following, the guard would wave through budgets the job then
+          cancels -- which skips the step that reports why, the failure this
+          workflow is built to prevent.
+        type: number
+        required: false
+        default: 45
+      review-timeout-minutes:
+        description: >-
+          Wall-clock bound on the review step itself, in minutes. Separate from
+          the job's own `timeout-minutes` on purpose: a job timeout CANCELS the
+          job, which skips the step that reports why, so the run dies with no
+          explanation. A step timeout fails only that step and leaves the
+          reporting intact. Keep it above the turn budget's expected wall-clock
+          cost, so `max-turns` stays the ordinary bound, and far enough below
+          the job timeout that this fires first.
+        type: number
+        required: false
+        default: 30
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
@@ -111,7 +144,9 @@ jobs:
       # so comments are attributed to claude[bot]. Safe under the fork guard.
       id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Read by the budget guard below through the same input, so the two cannot
+    # disagree.
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
     # PR-keyed and cancelling, not SHA-keyed and serialising. Any dedup that
     # reads shared state helps only AFTER a run finishes writing it; two runs
     # in flight for one SHA both see "not reviewed" and both pay. Keying on the
@@ -123,6 +158,51 @@ jobs:
       group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
+      # First, and pure arithmetic, so a misconfigured budget is refused before
+      # anything is spent. `codex-wait-seconds` is bounded in check.js
+      # (WAIT_SECONDS must not exceed 600); `review-timeout-minutes` had no
+      # equivalent, and the margin this job depends on only holds while both
+      # stay small enough to fit under the job's own timeout.
+      #
+      # Getting this wrong is silent and expensive: the job timeout fires
+      # instead of the step timeout, `cancelled()` becomes true, the step that
+      # explains why is skipped, and the run dies red with an empty summary --
+      # exactly what moving the bound onto the step was meant to prevent. Both
+      # tunables have already been raised more than once, so the guard is
+      # against the ordinary case rather than a hypothetical one.
+      - name: Check the review budget fits the job timeout
+        env:
+          REVIEW_TIMEOUT: ${{ inputs.review-timeout-minutes }}
+          CODEX_WAIT: ${{ inputs.codex-wait-seconds }}
+          # The job's own ceiling, through the input it is set from -- not a
+          # second literal. A guard that measures against a stale copy of the
+          # bound is the drift this workflow keeps removing elsewhere.
+          JOB_TIMEOUT: ${{ inputs.job-timeout-minutes }}
+          # Measured at ~12s total (change detection, dedup, checkout at
+          # fetch-depth 0, contract resolution, confirmation, reporting); 2
+          # minutes is that with an order of magnitude to spare.
+          OVERHEAD_MARGIN: 2
+        run: |
+          set -euo pipefail
+          codex_minutes=$(( (CODEX_WAIT + 59) / 60 ))
+          needed=$(( codex_minutes + REVIEW_TIMEOUT + OVERHEAD_MARGIN ))
+          if [ "$needed" -gt "$JOB_TIMEOUT" ]; then
+            {
+              echo "### Review budget does not fit the job timeout"
+              echo
+              echo "\`codex-wait-seconds\` (${CODEX_WAIT}s = ${codex_minutes}m) plus"
+              echo "\`review-timeout-minutes\` (${REVIEW_TIMEOUT}m) plus ${OVERHEAD_MARGIN}m of"
+              echo "measured overhead needs ${needed}m, but the job timeout is ${JOB_TIMEOUT}m."
+              echo
+              echo "The job would be cancelled before the review step's own timeout"
+              echo "fires, which skips the step that reports why. Lower one of the two"
+              echo "inputs, or raise the job timeout deliberately."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Review budget needs ${needed}m but the job timeout is ${JOB_TIMEOUT}m; refusing to start." >&2
+            exit 1
+          fi
+          echo "Review budget fits: ${codex_minutes}m Codex wait + ${REVIEW_TIMEOUT}m review + ${OVERHEAD_MARGIN}m overhead = ${needed}m of ${JOB_TIMEOUT}m." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Detect reviewable changes
         id: changes
         # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
@@ -437,6 +517,50 @@ jobs:
       - name: Claude review
         id: review
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
+        # Bounded HERE rather than only by `job-timeout-minutes`, because the two
+        # failures are not equivalent. A job timeout CANCELS the job, which makes
+        # `cancelled()` true and skips `Report review outcome` entirely -- the
+        # step built to name the cause never runs, and the job dies with no
+        # summary at all. A step timeout fails only this step, so the reporting
+        # step still runs and the "did not finish" branch names it.
+        #
+        # MEASURED, not assumed: whether a step timeout leaves `cancelled()`
+        # false is a documented ambiguity, and the whole reason for moving the
+        # bound here rests on it. A probe job (crossroads-ci run 33661371506,
+        # `timeout-minutes: 1` over a `sleep 180`) recorded the step timing out
+        # with outcome AND conclusion `failure`, and the following
+        # `if: !cancelled()` step running normally. So the premise holds, and a
+        # step timeout arrives as `failure` rather than `cancelled`.
+        #
+        # The default sits between the two bounds it has to respect. Above
+        # turn exhaustion: 120 turns at the measured ~6 turns/min is about 20
+        # minutes, so the budget still binds first and `error_max_turns` stays
+        # the ordinary diagnosis. Below the job ceiling: the worst legal
+        # `codex-wait-seconds` is 10 minutes, and everything else before the
+        # reviewer -- change detection, head-SHA dedup, checkout at
+        # fetch-depth 0, contract resolution -- was MEASURED at 5-9s on
+        # crossroads-ci and 8-12s on crossroads-ui, the larger consumer, over
+        # three runs each. So the worst case is about 10 + 30 + 0.2 = 40.2
+        # minutes against the 45-minute default of `job-timeout-minutes`. That
+        # arithmetic is worked at the default deliberately: it is a measurement
+        # of one configuration, not a claim that holds for every override, and
+        # the pre-flight check is what actually enforces the relationship.
+        #
+        # The steps AFTER the reviewer sit inside the same job timeout and
+        # were measured too, since an accounting that stops at the reviewer
+        # would protect the wrong interval: confirmation and reporting took 2s
+        # and 0s across three runs, on this pull request at 48 artefacts (8
+        # comments, 20 inline, 20 reviews) -- the volume its three paginated
+        # queries actually walk. Total non-review cost is therefore ~12s, and
+        # the worst case stands at about 40.2 minutes.
+        #
+        # That margin is roughly 5 minutes and it is an assumption, not a
+        # guarantee. Dedup paginates every workflow run for the head SHA,
+        # checkout scales with history, and the confirmation queries scale with
+        # comment volume. What would break it is any of those costing minutes
+        # rather than seconds; re-measure before raising this default or the
+        # Codex wait.
+        timeout-minutes: ${{ inputs.review-timeout-minutes }}
         uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
@@ -508,11 +632,19 @@ jobs:
       # next push retries instead of inheriting a false "already reviewed".
       - name: Confirm a review actually reached the pull request
         id: posted
+        # Gated on the step's own outcome, not on its `conclusion` output. The
+        # output has been observed empty on a step that SUCCEEDED and whose
+        # reviewer had posted comments (crossroads-ui#214). Gating the evidence
+        # check on it meant the one check able to vindicate that run was the
+        # one skipped, and the job then failed for the missing output while the
+        # review sat on the pull request. Counting artefacts is the stronger
+        # signal anyway: it reads what reached the PR rather than what the
+        # action said about itself.
         if: >-
           steps.changes.outputs.reviewable == 'true' &&
           steps.dedup.outputs.skip == 'false' &&
           steps.codex.outputs.reviewed != 'true' &&
-          steps.review.outputs.conclusion == 'success'
+          steps.review.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -564,6 +696,37 @@ jobs:
             echo "Reviewer reported success but posted nothing; treating as unreviewed." >&2
             exit 1
           fi
+          # A PR-LEVEL verdict, not merely "something was posted". The prompt
+          # ends "ALWAYS finish by posting exactly one summary comment", so that
+          # comment is the reviewer's own last action and its presence is the
+          # closest thing this job has to proof the review ran to completion.
+          #
+          # Counting any artefact was too weak: it rests entirely on truncation
+          # always surfacing as outcome=failure, which is claude-code-action's
+          # internal exit-code behaviour and not something this workflow can
+          # enforce. A run cut off after posting a few inline findings but
+          # before its summary would have exited 0, counted those findings as
+          # evidence, and been recorded as reviewed -- the truncated review
+          # passing that this guard exists to prevent.
+          #
+          # Inline comments alone are therefore not enough. Reviews count
+          # alongside comments because the verdict is PR-level either way; in
+          # agent mode only `gh pr comment` is granted, so today this is the
+          # comments query, and a future version granting a review tool stays
+          # covered.
+          verdict=$((comments + reviews))
+          if [ "$verdict" -eq 0 ]; then
+            {
+              echo "### Claude review did not finish"
+              echo
+              echo "${inline} inline comment(s) reached this PR, but the summary"
+              echo "comment the prompt always ends with never arrived, so the"
+              echo "reviewer stopped before its last step and what it posted is"
+              echo "partial. Treat this PR as UNREVIEWED."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer posted ${inline} inline comment(s) but no summary verdict; treating as unreviewed." >&2
+            exit 1
+          fi
           echo "Review reached the pull request (${total} artefact(s): ${comments} comment(s), ${reviews} review(s), ${inline} inline)." >> "$GITHUB_STEP_SUMMARY"
 
       # An early exit with no conclusion and no stated reason fails, so green
@@ -573,14 +736,155 @@ jobs:
         if: ${{ !cancelled() && steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true' }}
         env:
           CONCLUSION: ${{ steps.review.outputs.conclusion }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+          POSTED: ${{ steps.posted.outcome }}
+          # Interpolated, never retyped: a diagnostic that misdescribes its own
+          # trigger costs more than the failure it reports, and `max-turns` was
+          # retuned twice in this PR alone.
+          REVIEW_TIMEOUT: ${{ inputs.review-timeout-minutes }}
         run: |
           set -euo pipefail
-          if [ -z "$CONCLUSION" ]; then
-            echo "The reviewer produced no conclusion; treat this PR as unreviewed." >&2
+          # An empty conclusion on a step that succeeded is not evidence of a
+          # missing review -- crossroads-ui#214 had one, with the reviewer's
+          # comments sitting on the pull request. Where the artefact count
+          # already confirmed a review reached the PR, that is the stronger
+          # signal and it stands on its own; the conclusion output is a claim
+          # the action makes about itself.
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "success" ] && [ "$POSTED" = "success" ]; then
+            echo "Reviewer emitted no conclusion, but a review reached the pull request; treating as reviewed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # The evidence check already wrote the specific reason it failed --
+          # nothing posted at all, or inline findings with no summary verdict --
+          # so this step points at that message instead of composing a second
+          # one. Restating it generically put two contradicting paragraphs in
+          # the same run summary: "left no comment, review or inline comment"
+          # printed directly beneath "N inline comment(s) reached this PR".
+          #
+          # Deferring also covers a non-empty conclusion. `posted` failing while
+          # the action reports `success` used to match no branch at all and fall
+          # through to "Claude review ran", asserting a clean outcome beside the
+          # real failure. A review with no verdict is unreviewed whatever the
+          # action says about itself.
+          #
+          # `posted` shares this step's own `if:` conditions and additionally
+          # requires the review step to have succeeded, so whenever this step
+          # runs after a successful review, `posted` ran too: it is success or
+          # failure here, never skipped.
+          # Ordered ahead of the evidence deference below, because a reported
+          # failure is the more specific fact. `posted` only runs when the STEP
+          # succeeded, but the action's conclusion can independently be
+          # `failure` -- that split is why this file tracks the two separately
+          # -- and a reviewer that errored out usually posted nothing, so the
+          # evidence check fails too. Deferring first sent the reader to
+          # `posted`'s "most likely the reviewer has no tool able to comment",
+          # a plausible-but-wrong lead when the real cause was a reported
+          # failure such as error_max_turns.
+          if [ -n "$CONCLUSION" ] && [ "$CONCLUSION" != "success" ]; then
+            {
+              echo "### Claude review reported a failure"
+              echo
+              echo "The reviewer finished with conclusion \`${CONCLUSION}\`. Open the"
+              echo "**Claude review** step's log for the reason; if it also posted"
+              echo "nothing, that is a consequence, not the cause."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "The reviewer reported a failure (conclusion: ${CONCLUSION}); treat this PR as unreviewed." >&2
             exit 1
           fi
-          echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
-          [ "$CONCLUSION" = "success" ] || {
-            echo "The reviewer reported a failure; treat this PR as unreviewed." >&2
+          if [ "$POSTED" = "failure" ]; then
+            echo "Review evidence check failed; see 'Confirm a review actually reached the pull request' above. Treat this PR as unreviewed." >&2
             exit 1
-          }
+          fi
+          # An empty conclusion has several causes that need different actions,
+          # and naming the wrong one costs an investigation. This step runs
+          # under !cancelled(), so it is reached even when the reviewer never
+          # started -- `steps.review.outcome` is what separates the cases.
+          #
+          # Each outcome is matched by NAME, and anything unrecognised falls to
+          # the catch-all rather than borrowing a neighbour's diagnosis. An
+          # earlier draft made this branch the default ("not success and not
+          # failure"), which would have swallowed `cancelled` and told the
+          # reader nothing ran when in fact the review had.
+          if [ -z "$CONCLUSION" ] && [ "$REVIEW_OUTCOME" = "skipped" ]; then
+            # Skipped: an earlier step in this job failed, so the reviewer was
+            # never invoked. Nothing was reviewed and no turn budget was spent.
+            #
+            # The cause is named generically on purpose. An earlier draft said
+            # "checkout or contract resolution", which is not exhaustive: `Wait
+            # for Codex review` runs before Checkout and carries no `if:`, so
+            # its failure skips the reviewer with this same signature while
+            # leaving `steps.codex.outputs.reviewed` unset, which keeps this
+            # step running. Enumerating steps here would point the reader at
+            # the wrong one -- the misdiagnosis this whole change removes.
+            {
+              echo "### Claude review never started"
+              echo
+              echo "The reviewer step was \`${REVIEW_OUTCOME}\`, so an earlier step in"
+              echo "this job failed and the reviewer was never invoked. Find the red"
+              echo "step above and fix that; the turn budget is not involved here,"
+              echo "and nothing was reviewed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer never started (step ${REVIEW_OUTCOME}); fix the earlier red step in this job. Treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          # `cancelled` belongs here, not with the never-started case. The
+          # probe cited on the review step measured a step timeout arriving as
+          # `failure`, so this is not the timeout path in practice -- but a
+          # cancelled review step we are still here to report on was stopped
+          # individually either way, since a JOB cancellation would make
+          # `cancelled()` true and skip this step altogether. Both values mean
+          # the reviewer started and was cut off, so both take this branch and
+          # the routing survives the runner changing its mind.
+          if [ -z "$CONCLUSION" ] \
+            && { [ "$REVIEW_OUTCOME" = "failure" ] || [ "$REVIEW_OUTCOME" = "cancelled" ]; }; then
+            # Ran and died mid-review. Saying "produced no conclusion" sent
+            # three separate investigations looking for a broken output capture
+            # when the cause was error_max_turns each time, with findings
+            # already posted on the PR.
+            #
+            # Two bounds now produce this signature, and they need opposite
+            # responses: the turn budget, and the step's own `timeout-minutes`
+            # added by this change. Both surface as outcome=failure with no
+            # conclusion, so the message asks the reader which one the log
+            # shows rather than asserting either. Raising `max-turns` for a
+            # wall-clock timeout would be the same misdiagnosis one bound over.
+            {
+              echo "### Claude review did not finish"
+              echo
+              echo "The reviewer step failed before reporting a conclusion, so this"
+              echo "PR is only partly reviewed and anything it posted is incomplete."
+              echo "Both bounds end the step the same way, so its outcome does not"
+              echo "tell them apart. The **Claude review** log line does:"
+              echo
+              echo "- \`error_max_turns\` — the turn budget ran out mid-review."
+              echo "  Raise \`max-turns\`."
+              echo "- \`has timed out after ${REVIEW_TIMEOUT} minutes\` — the step's"
+              echo "  \`timeout-minutes\`, which is wall-clock. Raising \`max-turns\` will"
+              echo "  not help; the review is running slower per turn than the budget"
+              echo "  assumes."
+              echo
+              echo "Those two are the bounds this workflow sets, not the only ways to"
+              echo "get here: any unhandled error in the action — a crash, an auth"
+              echo "failure, an OOM — ends the step the same way. If the log shows"
+              echo "neither bound, read it for the actual error rather than retuning"
+              echo "either budget."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer step did not finish (no conclusion); see the Claude review step. Treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          if [ -z "$CONCLUSION" ]; then
+            # Unrecognised outcome. Report the value and assert no cause: a
+            # guess here is the misdiagnosis this whole step exists to avoid.
+            {
+              echo "### Claude review outcome not recognised"
+              echo
+              echo "The reviewer step reported \`${REVIEW_OUTCOME}\` with no conclusion,"
+              echo "which this check has no diagnosis for. Read the **Claude review**"
+              echo "step's log directly. Treat this PR as UNREVIEWED."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer outcome '${REVIEW_OUTCOME}' with no conclusion is unrecognised; treat this PR as unreviewed." >&2
+            exit 1
+          fi
+          # Every other value was handled above, so reaching here means
+          # conclusion=success with the evidence check satisfied.
+          echo "Claude review ran (conclusion: ${CONCLUSION})." >> "$GITHUB_STEP_SUMMARY"
