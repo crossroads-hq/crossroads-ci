@@ -54,7 +54,7 @@ Caller-side, in any fleet repository:
 ```yaml
 jobs:
   supply-chain:
-    uses: tsviser/crossroads-ci/.github/workflows/_supply-chain.yml@main
+    uses: crossroads-hq/crossroads-ci/.github/workflows/_supply-chain.yml@main
     with: { npm-audit: true }
 
   # Enable Codex automatic reviews for the repository in ChatGPT first. This
@@ -71,7 +71,7 @@ jobs:
     # Pin a SHA, not @main. The tamper-resistance argument for this workflow
     # rests on a consumer's pull request being unable to move the ref it
     # runs; @main is a ref this repository can move under every consumer.
-    uses: tsviser/crossroads-ci/.github/workflows/_ai-review.yml@<commit-sha>
+    uses: crossroads-hq/crossroads-ci/.github/workflows/_ai-review.yml@<commit-sha>
     # A called workflow's jobs may not exceed the CALLER's grant. The review
     # job needs `pull-requests: write` to comment and `id-token: write` for
     # the Claude App token; `id-token` defaults to none and is never
@@ -96,7 +96,7 @@ jobs:
     # No checkout when pinning the remote action (crossroads-ui pattern).
     # This repo's ci.yml checks out because it calls ./actions/gate locally.
     steps:
-      - uses: tsviser/crossroads-ci/actions/gate@main
+      - uses: crossroads-hq/crossroads-ci/actions/gate@main
         with:
           results: |
             { "Verify": "${{ needs.verify.result }}",
@@ -105,7 +105,7 @@ jobs:
 
 This repository is private; fleet repositories can use its actions and
 workflows because Actions access is set to `user` scope
-(`gh api repos/tsviser/crossroads-ci/actions/permissions/access`).
+(`gh api repos/crossroads-hq/crossroads-ci/actions/permissions/access`).
 
 ## Rules that keep this honest
 

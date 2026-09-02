@@ -92,8 +92,14 @@ jobs:
     # The caller gates on its own conditions (draft, labels, site-only); this
     # workflow enforces the ones it can see. The fork check is load-bearing:
     # secrets must never reach a workflow definition a stranger controls.
+    # The dependabot exclusion is structural, not preference: its runs draw
+    # from the Dependabot secrets store (no reviewer token there), and its
+    # actions-group PRs edit workflow files, which the review action's
+    # anti-tamper guard refuses to run against. Both were measured on PR #20
+    # -- the job can only fail, so it must not start.
     if: >-
       github.event_name == 'pull_request' &&
+      github.actor != 'dependabot[bot]' &&
       !github.event.pull_request.draft &&
       !contains(github.event.pull_request.title, '[skip-ai-review]') &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -128,7 +134,7 @@ jobs:
         # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
         # cross-repo, a relative path resolves against the CALLER's checkout,
         # which at this point in the job does not exist.
-        uses: tsviser/crossroads-ci/actions/detect-reviewable@932432038147d4f19d5c996e9985d8dcc87bf4f6 # main
+        uses: crossroads-hq/crossroads-ci/actions/detect-reviewable@932432038147d4f19d5c996e9985d8dcc87bf4f6 # main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -212,7 +218,7 @@ jobs:
       - name: Wait for Codex review
         id: codex
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
-        uses: tsviser/crossroads-ci/actions/await-codex-review@c863c4b2c0e3614b50986277a22b962bc98402ee # await-codex-review v1
+        uses: crossroads-hq/crossroads-ci/actions/await-codex-review@c863c4b2c0e3614b50986277a22b962bc98402ee # await-codex-review v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-seconds: ${{ inputs.codex-wait-seconds }}
