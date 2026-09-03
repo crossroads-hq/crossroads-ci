@@ -124,12 +124,18 @@ done
 # --------------------------------------------- 3. repo secrets shadow org ones
 say ""
 say "### Secrets"
-org_secrets="$(try "orgs/$ORG/actions/secrets" | jq -r '[.secrets[].name] | join("\n")' 2>/dev/null || true)"
+# Paginated, like every other org list read. This endpoint returns an object
+# rather than a bare array, so --slurp yields one object per page and the names
+# are flattened out of each page's `.secrets` -- an unpaginated read stopped at
+# 30 and reported the fleet clean of shadowing past it.
+org_secrets="$(tryp "orgs/$ORG/actions/secrets" | jq -r '[.[].secrets[].name] | join("\n")' 2>/dev/null || true)"
 if [ -z "${org_secrets:-}" ]; then
   info "org secrets unreadable; shadowing unchecked"
 else
   for r in "${repos[@]}"; do
-    repo_secrets="$(try "repos/$ORG/$r/actions/secrets" | jq -r '[.secrets[].name] | join("\n")' 2>/dev/null || true)"
+    # Paginated for the same reason as the org read above: this is the other
+    # half of the same comparison, and truncating either side hides shadowing.
+    repo_secrets="$(tryp "repos/$ORG/$r/actions/secrets" | jq -r '[.[].secrets[].name] | join("\n")' 2>/dev/null || true)"
     [ -z "${repo_secrets:-}" ] && continue
     while IFS= read -r name; do
       [ -z "$name" ] && continue
