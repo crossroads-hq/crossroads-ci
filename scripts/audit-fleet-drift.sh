@@ -19,6 +19,19 @@
 #     copy would have appeared to work and changed nothing.
 #   - A production deploy failed `gh: command not found` after moving to a
 #     capability label: the step assumed tooling one host happened to have.
+#   - The reviewed fleet list and the org disagreed in BOTH directions, and
+#     every script reported clean. Four entries named repositories the org
+#     does not hold -- still owned by the pre-migration account -- and
+#     verify-pins.sh read each 404 as "no workflows (minimal: expected)".
+#     Two repositories the org governs by custom property were absent from
+#     the reviewed list, so apply-fleet.sh, verify-fleet.sh and verify-pins.sh
+#     all skipped them. Neither list could see either fault alone.
+#
+# Which list drives what: governance/repositories.txt, the REVIEWED fleet, is
+# what every check below the classification section walks -- taking that list
+# from the org API made this script a second, unreviewed roster beside the
+# checked-in one, which is the drift it exists to find. The org listing is read
+# only so the classification section can reconcile the two.
 #
 # Exit 1 on anything in the MUST section, 0 otherwise. INFO findings are
 # printed but never fail the run -- a check that cries wolf gets muted, and a
@@ -82,32 +95,117 @@ say "## Fleet drift audit — \`$ORG\`"
 say ""
 
 # ---------------------------------------------------------------- repositories
+#
+# TWO lists, deliberately, and the difference between them is a finding.
+#
+# governance/repositories.txt is the REVIEWED fleet: the list apply-fleet.sh,
+# verify-fleet.sh and verify-pins.sh already read, and the one a change has to
+# pass a governance decision to reach. Every check below the classification
+# section asks a question about the GOVERNED fleet, so it walks that list.
+# Taking the roster from the org API instead made this script a second,
+# unreviewed fleet roster beside the checked-in one -- the exact drift it
+# exists to find, in itself -- and it silently disagreed with the reviewed one
+# in both directions (see the classification section).
+#
+# The org listing is still read, because reconciling the two IS the
+# classification check. Neither list can answer "what is escaping governance?"
+# alone: the roster cannot name a repository nobody added to it, and the org
+# cannot say which repositories were reviewed.
+fleet_file="${1:-governance/repositories.txt}"
+[ -r "$fleet_file" ] || { echo "cannot read fleet list: $fleet_file" >&2; exit 1; }
+
 repos_json="$(tryp "orgs/$ORG/repos?per_page=100" | jq '[.[][]]')" || {
   say "Could not list repositories for \`$ORG\`. The token needs org read access."
   exit 1
 }
-# Not `mapfile`: that is bash 4+, and macOS ships 3.2. This script is meant
-# to run by hand as well as in CI, and the fleet now has a macOS lane.
+org_live="$(jq -r '.[] | select(.archived == false) | .name' <<<"$repos_json")"
+org_all="$(jq -r '.[] | .name' <<<"$repos_json")"
+
+# Parsed the way verify-fleet.sh and verify-pins.sh already parse it, so the
+# three scripts cannot disagree about what the file means. Held as a
+# tab-separated string rather than an associative array: those are bash 4+,
+# macOS ships 3.2, and this script is meant to run by hand as well as in CI.
+roster=""
+roster_foreign=""
+while read -r repo profile branch _; do
+  case "$repo" in ''|'#'*) continue ;; esac
+  case "$repo" in
+    "$ORG"/*) roster="${roster}${repo#"$ORG"/}	${profile}
+" ;;
+    # An entry owned by someone else is not auditable here and must not be
+    # silently skipped: it is either a genuine cross-org entry this audit
+    # cannot see, or a roster line the migration missed.
+    *) roster_foreign="${roster_foreign}${repo}
+" ;;
+  esac
+done < "$fleet_file"
+
+roster_names="$(printf '%s' "$roster" | cut -f1)"
+roster_profile() { printf '%s' "$roster" | awk -F'\t' -v n="$1" '$1==n {print $2; exit}'; }
+
+# The auditable set: reviewed AND actually present, non-archived, in this org.
+# Roster entries that fail either half are reported below rather than walked --
+# every per-repository check would only 404 on them.
 repos=()
 while IFS= read -r _r; do
-  [ -n "$_r" ] && repos+=("$_r")
-done <<<"$(jq -r '.[] | select(.archived == false) | .name' <<<"$repos_json")"
-say "Auditing ${#repos[@]} non-archived repositories."
+  [ -n "$_r" ] || continue
+  grep -qxF "$_r" <<<"$org_live" && repos+=("$_r")
+done <<<"$roster_names"
+
+say "Auditing ${#repos[@]} of $(grep -c . <<<"$roster_names") reviewed repositories; \`$ORG\` holds $(grep -c . <<<"$org_live") non-archived."
 say ""
 
-# ------------------------------------------------- 1. unclassified = ungoverned
+# --------------------------------------- 1. the two lists must name one fleet
 say "### Classification"
+
+while IFS= read -r _r; do
+  [ -n "$_r" ] || continue
+  if grep -qxF "$_r" <<<"$org_live"; then continue; fi
+  if grep -qxF "$_r" <<<"$org_all"; then
+    fail "\`$_r\` is on the reviewed list but ARCHIVED. Archiving supersedes any ruleset; unarchive before governing it, or remove the entry."
+  else
+    fail "\`$_r\` is on the reviewed list but \`$ORG\` has no such repository. Every per-repository check keys on gh's exit status, and a 404 for a name that does not exist is indistinguishable from \"nothing to check here\" -- verify-pins.sh reports such an entry as \"no workflows (minimal: expected)\" and exits 0."
+  fi
+done <<<"$roster_names"
+
+while IFS= read -r _r; do
+  [ -n "$_r" ] || continue
+  fail "\`$_r\` is on the reviewed list under another owner, so this audit cannot see it. Either the migration missed the line, or it belongs to an org this run does not audit."
+done <<<"$roster_foreign"
+
 props="$(tryp "orgs/$ORG/properties/values?per_page=100" | jq '[.[][]]')" || props=""
 if [ -z "$props" ]; then
   info "custom property values unreadable (token lacks org read); classification unchecked"
 else
-  for r in "${repos[@]}"; do
-    profile="$(jq -r --arg r "$r" '.[] | select(.repository_name==$r) | .properties[] | select(.property_name=="fleet-profile") | .value // "none"' <<<"$props")"
+  while IFS= read -r _r; do
+    [ -n "$_r" ] || continue
+    profile="$(jq -r --arg r "$_r" '.[] | select(.repository_name==$r) | .properties[] | select(.property_name=="fleet-profile") | .value // "none"' <<<"$props")"
     [ -z "$profile" ] && profile="unset"
+
     if [ "$profile" = "none" ] || [ "$profile" = "unset" ]; then
-      fail "\`$r\` has \`fleet-profile=$profile\` — no org ruleset targets it, so it is ungoverned."
+      fail "\`$_r\` has \`fleet-profile=$profile\` — no org ruleset targets it, so it is ungoverned."
+      continue
     fi
-  done
+
+    # Governed by the org, absent from the reviewed list. The org ruleset
+    # protects it, so nothing looks wrong from GitHub's side -- but
+    # apply-fleet.sh, verify-fleet.sh and verify-pins.sh all walk the reviewed
+    # list, so no script this repository ships ever checks it.
+    if ! grep -qxF "$_r" <<<"$roster_names"; then
+      fail "\`$_r\` carries \`fleet-profile=$profile\` but is not in ${fleet_file}, so every script that walks the reviewed list skips it. Add it with a profile, or set the property to \`none\` if it is deliberately ungoverned."
+      continue
+    fi
+
+    # `full+tags` is how the roster spells what the custom property calls
+    # `full-tags`; the property is a single-select and its allowed values
+    # cannot carry the `+`. Any other disagreement is two sources of truth
+    # prescribing different rulesets for one repository.
+    want="$(roster_profile "$_r")"
+    case "$want" in full+tags) want="full-tags" ;; esac
+    if [ "$want" != "$profile" ]; then
+      fail "\`$_r\` is \`$(roster_profile "$_r")\` in ${fleet_file} but \`fleet-profile=$profile\` in the org. The org property decides which ruleset applies; the file decides what apply-fleet.sh writes."
+    fi
+  done <<<"$org_live"
 fi
 
 # ------------------------------------- 2. repo rulesets escape org governance
