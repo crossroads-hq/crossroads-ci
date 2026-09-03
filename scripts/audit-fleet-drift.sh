@@ -46,11 +46,43 @@ info() { say "- info — $*"; }
 # whole script exists to catch.
 try() { gh api "$@" 2>/dev/null || return 1; }
 
+# Paginated variant. `gh api` fetches ONE page unless told otherwise, so a
+# `?per_page=100` list silently truncates at 100 and the audit reports "no
+# drift" for everything past it -- the same failure as aborting early, just
+# quiet instead of loud. --slurp yields an array of pages, flattened with
+# `.[][]` by callers, matching verify-fleet.sh's existing house pattern.
+tryp() { gh api --paginate --slurp "$@" 2>/dev/null || return 1; }
+
+# Both runs-on spellings must be seen. Only the flow form was scanned at
+# first, so a job written as a YAML block sequence --
+#
+#   runs-on:
+#     - self-hosted
+#     - some-repo-name
+#
+# -- escaped the identity check entirely. A selector style invisible to the
+# audit is the same failure as the drift it looks for.
+normalise_runs_on() {
+  awk '
+    /^[[:space:]]*runs-on:[[:space:]]*\[/ { print; next }
+    /^[[:space:]]*runs-on:[[:space:]]*$/   { collecting=1; n=0; next }
+    collecting && /^[[:space:]]*-[[:space:]]*/ {
+      item=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",item); gsub(/[\"'"'"']/,"",item)
+      items[n++]=item; next
+    }
+    collecting {
+      if (n>0) { out=""; for(i=0;i<n;i++) out=out (i?", ":"") items[i]; print "runs-on: [" out "]" }
+      collecting=0; n=0
+    }
+    END { if (collecting && n>0) { out=""; for(i=0;i<n;i++) out=out (i?", ":"") items[i]; print "runs-on: [" out "]" } }
+  ' <<<"$1"
+}
+
 say "## Fleet drift audit — \`$ORG\`"
 say ""
 
 # ---------------------------------------------------------------- repositories
-repos_json="$(try "orgs/$ORG/repos?per_page=100")" || {
+repos_json="$(tryp "orgs/$ORG/repos?per_page=100" | jq '[.[][]]')" || {
   say "Could not list repositories for \`$ORG\`. The token needs org read access."
   exit 1
 }
@@ -65,7 +97,7 @@ say ""
 
 # ------------------------------------------------- 1. unclassified = ungoverned
 say "### Classification"
-props="$(try "orgs/$ORG/properties/values?per_page=100")" || props=""
+props="$(tryp "orgs/$ORG/properties/values?per_page=100" | jq '[.[][]]')" || props=""
 if [ -z "$props" ]; then
   info "custom property values unreadable (token lacks org read); classification unchecked"
 else
@@ -84,7 +116,8 @@ say "### Rulesets"
 for r in "${repos[@]}"; do
   # source_type filters out the INHERITED org ruleset, which this endpoint
   # also returns. Without the filter every repository looks like a violation.
-  local_rs="$(try "repos/$ORG/$r/rulesets" | jq -r '[.[] | select(.source_type != "Organization") | .name] | join(", ")' 2>/dev/null || true)"
+  rs_raw="$(try "repos/$ORG/$r/rulesets")" || { info "\`$r\` rulesets unreadable — NOT checked for local overrides."; continue; }
+  local_rs="$(jq -r '[.[] | select(.source_type != "Organization") | .name] | join(", ")' <<<"$rs_raw" 2>/dev/null || true)"
   [ -n "${local_rs:-}" ] && fail "\`$r\` carries repo-level ruleset(s): ${local_rs}. Rulesets are additive and the stricter rule wins, so this silently overrides the org."
 done
 
@@ -111,25 +144,37 @@ fi
 say ""
 say "### Runner selectors"
 for r in "${repos[@]}"; do
-  branch="$(try "repos/$ORG/$r" | jq -r .default_branch)" || continue
+  branch="$(try "repos/$ORG/$r" | jq -r .default_branch)" || { info "\`$r\` metadata unreadable — selectors NOT checked."; continue; }
   files="$(try "repos/$ORG/$r/contents/.github/workflows?ref=$branch" | jq -r '.[]?.name' 2>/dev/null || true)"
   [ -z "${files:-}" ] && continue
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     body="$(try "repos/$ORG/$r/contents/.github/workflows/$f?ref=$branch" | jq -r '.content' | base64 -d 2>/dev/null || true)"
-    [ -z "${body:-}" ] && continue
+    [ -z "${body:-}" ] && { info "\`$r/$f\` unreadable — selectors NOT checked."; continue; }
     # A repository name in runs-on re-pins a job to one lane and defeats the
     # shared pool. An OS label (Linux/Windows/macOS/X64/ARM64) is auto-detected
     # and cannot be claimed, so it permanently excludes every other host --
     # the reason three retired Mac runners were never once scheduled.
+    #
+    # Compared as TOKENS, not substrings. `case $sel in *"$bad"*` would flag
+    # every `[self-hosted, light]` in the fleet the day someone creates a
+    # repository named `light` -- crying wolf on the whole fleet, which is the
+    # failure this script's INFO/MUST split exists to avoid.
     while IFS= read -r sel; do
       [ -z "$sel" ] && continue
-      for bad in $(printf '%s\n' "${repos[@]}") Linux Windows macOS X64 ARM64; do
-        case "$sel" in
-          *"$bad"*) fail "\`$r/$f\`: \`$sel\` names \`$bad\`. Selectors should name capability (\`fast\`, \`light\`) only." ;;
-        esac
+      inner="${sel#*[}"; inner="${inner%]}"
+      old_ifs="$IFS"; IFS=','
+      # shellcheck disable=SC2086  # deliberate split on the comma-separated list
+      set -- $inner
+      IFS="$old_ifs"
+      for tok in "$@"; do
+        tok="$(printf '%s' "$tok" | tr -d "[:space:]\"'")"
+        [ -z "$tok" ] && continue
+        for bad in "${repos[@]}" Linux Windows macOS X64 ARM64; do
+          [ "$tok" = "$bad" ] && fail "\`$r/$f\`: \`$sel\` names \`$bad\`. Selectors should name capability (\`fast\`, \`light\`) only."
+        done
       done
-    done < <(grep -oE "runs-on: \[[^]]*\]" <<<"$body" || true)
+    done < <(normalise_runs_on "$body")
   done <<<"$files"
 done
 
@@ -178,7 +223,7 @@ for r in "${repos[@]}"; do
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     body="$(try "repos/$ORG/$r/contents/.github/workflows/$f?ref=$branch" | jq -r '.content' | base64 -d 2>/dev/null || true)"
-    grep -q "runs-on: \[self-hosted" <<<"${body:-}" || continue
+    normalise_runs_on "${body:-}" | grep -q "runs-on: \[self-hosted" || continue
     for tool in gh jq yq shellcheck; do
       if grep -qE "^\s+.*[^a-zA-Z-]${tool} (api|pr|run|release|-r|-e|--version)" <<<"$body"; then
         info "\`$r/$f\` runs on self-hosted lanes and invokes \`$tool\`. Confirm every lane provides it."
