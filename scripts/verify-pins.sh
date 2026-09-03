@@ -22,8 +22,12 @@
 #
 #   Exit 1 only under STRICT -- the answer is known and is "not current".
 #   A pin behind on its component, a mutable ref, or a ref that is not an
-#   ancestor of the base. These are normal states a fleet passes through, so
-#   they report and exit 0 by default.
+#   ancestor of the base; or a pin still addressing the pre-migration owner,
+#   which resolves by redirect today and stops resolving the moment anything
+#   reclaims the old name. These are normal states a fleet passes through, so
+#   they report and exit 0 by default. The owner is counted separately from
+#   the currency verdict: one pin can be both, and totalling it twice
+#   overstated how much of the fleet was out of date.
 #
 # "Behind" counts commits touching THAT COMPONENT'S path, not commits on main.
 # A gate pinned before thirty governance edits is not behind; a gate pinned
@@ -73,6 +77,7 @@ fi
 
 broken=0
 behind_total=0
+stale_owner_total=0
 pins_seen=0
 
 report_pin() {
@@ -236,18 +241,29 @@ while read -r repo profile branch _; do
     while IFS= read -r pin; do
       [ -n "$pin" ] || continue
       found=1
+      stale_owner=0
       case "$pin" in
         "${legacy_control_plane}"/*)
           component="${pin#"${legacy_control_plane}/"}"
-          printf '    %-42s %-10.8s STALE OWNER: pins %s, resolving by redirect  [%s]\n' \
-            "${component%@*}" "${pin##*@}" "$legacy_control_plane" "$wf"
-          behind_total=$((behind_total + 1))
+          stale_owner=1
           ;;
         *)
           component="${pin#"${control_plane}/"}"
           ;;
       esac
       report_pin "${component%@*}" "${pin##*@}" "$wf"
+      if [ "$stale_owner" -eq 1 ]; then
+        # A stale OWNER is an address finding; report_pin above has already
+        # classified and counted this pin's CONTENT. Reporting it here as a
+        # verdict of its own put one pin on two column-formatted lines -- which
+        # reads as two pins -- and added it to behind_total a second time when
+        # report_pin also found it behind, unpinned or diverged. It annotates
+        # the line above instead, indented like the bump log already is, and
+        # carries its own counter so the two totals cannot conflate.
+        printf '          STALE OWNER: pins %s, resolving by redirect\n' \
+          "$legacy_control_plane"
+        stale_owner_total=$((stale_owner_total + 1))
+      fi
     done <<<"$refs"
   done <<<"$workflows"
 
@@ -261,7 +277,7 @@ while read -r repo profile branch _; do
 done < "$fleet_file"
 
 echo
-echo "${pins_seen} pin(s); ${behind_total} not current (behind, unpinned or diverged); base ${base} at $(git rev-parse --short "$base")"
+echo "${pins_seen} pin(s); ${behind_total} not current (behind, unpinned or diverged); ${stale_owner_total} at the pre-migration owner; base ${base} at $(git rev-parse --short "$base")"
 
 if [ "$broken" -ne 0 ]; then
   echo
@@ -272,7 +288,8 @@ if [ "$broken" -ne 0 ]; then
   exit 1
 fi
 
-if [ "$behind_total" -ne 0 ] && [ "${STRICT:-0}" = "1" ]; then
+if { [ "$behind_total" -ne 0 ] || [ "$stale_owner_total" -ne 0 ]; } \
+   && [ "${STRICT:-0}" = "1" ]; then
   exit 1
 fi
 exit 0
