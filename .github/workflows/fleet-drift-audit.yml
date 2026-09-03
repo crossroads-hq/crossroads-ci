@@ -1,0 +1,48 @@
+# Weekly inverse of verify-fleet.sh: not "does each repository carry the right
+# ruleset" -- org rulesets make that unaskable -- but "is anything ESCAPING
+# inheritance?"
+#
+# Runs on ubuntu-latest, deliberately. An audit that cannot run while the
+# self-hosted fleet is down is unavailable exactly when it matters: on
+# 2026-09-03 the WSL box took every lane offline for three hours, and a
+# fleet-hosted audit would have been silent throughout. This also keeps `gh`
+# and `jq` guaranteed rather than assumed -- the assumption that broke the
+# production deploy the same day.
+name: Fleet drift audit
+
+on:
+  schedule:
+    # Mondays 07:00 UTC. Weekly, not nightly: the findings are structural and
+    # a daily red mail gets filtered, which is how an audit stops being read.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: fleet-drift-audit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Fleet drift audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # GITHUB_TOKEN is repository-scoped and cannot read org properties,
+      # secrets or runners, so the org-level checks would all degrade to
+      # "unreadable" under it. FLEET_AUDIT_TOKEN is a PAT with read:org.
+      # The script treats a missing permission as ONE skipped check rather
+      # than a failure, so it still reports usefully without the PAT -- but
+      # it will not catch unclassified repositories or shadowed secrets.
+      - name: Audit
+        env:
+          GH_TOKEN: ${{ secrets.FLEET_AUDIT_TOKEN || secrets.GITHUB_TOKEN }}
+          FLEET_ORG: ${{ github.repository_owner }}
+        run: bash scripts/audit-fleet-drift.sh
