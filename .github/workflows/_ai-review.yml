@@ -561,7 +561,7 @@ jobs:
         # rather than seconds; re-measure before raising this default or the
         # Codex wait.
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
-        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
+        uses: anthropics/claude-code-action@fa2b2666b747000bf42767d1f332065b375e3c8f # v1.0.214
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
           # This is AGENT mode: `prompt:` is set and track_progress defaults to
