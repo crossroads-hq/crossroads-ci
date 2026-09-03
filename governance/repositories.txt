@@ -46,26 +46,32 @@ crossroads-hq/crossroads-agent-system       full       main
 # workflow keeps running either way. Non-standard default branch.
 crossroads-hq/crossroads-os                 full       crossroads-os-v2
 
-# Tier D — live but CI-less. `minimal` until archived or promoted.
-# Both transferred from the tsviser account into the org on 2026-09-03. This
-# file had asserted crossroads-hq ownership for them since the migration while
-# they were still personal repositories, so every script that walks this list
-# was reading a 404 for each -- see the exclusion note below.
-crossroads-hq/evolution-demo                minimal    main
-crossroads-hq/resume-adaptation-assistant   minimal    main
+# Tier D is empty. It held four entries, all of them wrong: this file named
+# four repositories crossroads-hq has never held. The 2026-09 migration
+# rewrote the owner column for repositories that were never moved, and nothing
+# caught it, because the per-repository scripts key on gh's exit status and a
+# 404 for a name that does not exist is indistinguishable from "no workflows
+# here" -- verify-pins.sh reported each of the four as "no workflows on main
+# (minimal: expected)" and exited 0. All four are excluded below, for two
+# different reasons. Decision 2026-09-03.
+
 # Excluded, with reasons:
 #
 #   storybook-live-code — fork of storybookjs/storybook. Its workflows and
 #     branch model are upstream's; governing it here would fight the fork.
 #   Product-management-OS — fork of yanivy9h/ai-shipr.
-#   designer-skills — fork of Owl-Listener/designer-skills. Both were listed
-#     above as `minimal` while never being moved into the org, so this file
-#     named two repositories crossroads-hq does not hold. The same fork rule
+#   designer-skills — fork of Owl-Listener/designer-skills. The same fork rule
 #     that excludes storybook-live-code applies to both, and the cost is
 #     concrete rather than stylistic: `minimal` requires a pull request to
 #     merge, and that blocks GitHub's Sync-fork button, which lands upstream
-#     commits as a direct push to the default branch. They stay under the
-#     tsviser account, ungoverned by this fleet. Decision 2026-09-03.
+#     commits as a direct push to the default branch.
+#   evolution-demo, resume-adaptation-assistant — personal projects under the
+#     tsviser account, not part of this fleet. They were briefly transferred
+#     into the org on 2026-09-03 on the strength of these very lines, and
+#     transferred back the same day once that was corrected; each keeps its own
+#     repository-level `Crossroads main protection` ruleset, which is its own
+#     concern and not this fleet's. Listing a repository here is what makes it
+#     fleet -- do not re-add one because it merely looks adjacent.
 #   mini-rag, receipt-smart-sync, personality-insights-nodejs,
 #   apigw-sample-app — ARCHIVED 2026-08-24 (most recent last-commit dates range from 2015 to
 #     Feb 2026). Archiving freezes a repository entirely and supersedes any
