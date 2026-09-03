@@ -46,14 +46,22 @@ crossroads-hq/crossroads-agent-system       full       main
 # workflow keeps running either way. Non-standard default branch.
 crossroads-hq/crossroads-os                 full       crossroads-os-v2
 
-# Tier D is empty. It held four entries, all of them wrong: this file named
-# four repositories crossroads-hq has never held. The 2026-09 migration
-# rewrote the owner column for repositories that were never moved, and nothing
-# caught it, because the per-repository scripts key on gh's exit status and a
-# 404 for a name that does not exist is indistinguishable from "no workflows
-# here" -- verify-pins.sh reported each of the four as "no workflows on main
-# (minimal: expected)" and exited 0. All four are excluded below, for two
-# different reasons. Decision 2026-09-03.
+# Tier D — live but CI-less. `minimal` until archived or promoted.
+# Neither has a .github/workflows directory, which is precisely what `minimal`
+# is for. Both were ALREADY governed -- they carry fleet-profile=minimal and
+# the org ruleset protects them -- so what these two lines change is not their
+# protection but their reviewability: apply-fleet.sh, verify-fleet.sh and
+# verify-pins.sh all walk this file, and until now all three skipped them.
+# Being governed by the org and being absent from here is the quiet half of
+# the drift the other four entries were the loud half of. Added 2026-09-04.
+crossroads-hq/git-guards                    minimal    main
+crossroads-hq/skills                        minimal    main
+
+# Tier D previously held four entries, all of them wrong: this file named four
+# repositories crossroads-hq has never held, and nothing caught it because the
+# per-repository scripts key on gh's exit status, where a 404 for a name that
+# does not exist is indistinguishable from "no workflows here". All four are
+# excluded below, for two different reasons. Decision 2026-09-03.
 
 # Excluded, with reasons:
 #
