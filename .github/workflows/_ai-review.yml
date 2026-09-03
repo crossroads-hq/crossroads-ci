@@ -237,6 +237,44 @@ jobs:
       # Only the named Claude confirmation step is durable enough to skip
       # directly; Codex-only successes flow to the verifier below and are
       # revalidated against the current formal-review or clean-comment state.
+      # The reviewer ACTION refuses to run when the workflow that invoked it
+      # differs from the copy on the default branch -- it exits as a SKIP,
+      # having posted nothing, so from outside it is indistinguishable from a
+      # reviewer that ran and stayed silent. Measured on crossroads-ui#227,
+      # whose only changed file is the caller workflow: "Workflow validation
+      # failed... Skipping action due to workflow validation", review step
+      # duration 1.9s against the 8-12 minutes a real review takes.
+      #
+      # This does NOT skip the review. The guard that skipped every pull
+      # request touching .github/workflows/ is the inversion this workflow was
+      # written to remove, per the header above, and reinstating it here under
+      # a new name would be the same mistake. The reviewer is still invoked and
+      # the job still fails; what changes is that the failure names this cause
+      # instead of sending the reader to check the action's tool configuration.
+      - name: Detect whether this pull request edits the invoking workflow
+        id: entry
+        if: steps.changes.outputs.reviewable == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          # Same parse as the dedup step below: workflow_ref is
+          # owner/repo/.github/workflows/x.yml@ref.
+          wf_path="${WORKFLOW_REF%%@*}"
+          wf_path="${wf_path#*/}"
+          wf_path="${wf_path#*/}"
+
+          if gh api "repos/${REPO}/pulls/${PR}/files" --paginate --slurp \
+              | jq -e --arg p "$wf_path" 'any(.[][]; .filename == $p)' >/dev/null; then
+            echo "edits-invoking-workflow=true" >> "$GITHUB_OUTPUT"
+            echo "This pull request edits ${wf_path}, the workflow that invokes the reviewer, so the reviewer action will refuse to run." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "edits-invoking-workflow=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check whether Claude already reviewed this head SHA
         id: dedup
         if: steps.changes.outputs.reviewable == 'true'
@@ -650,6 +688,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           SINCE: ${{ steps.stamp.outputs.started }}
+          EDITS_INVOKING_WORKFLOW: ${{ steps.entry.outputs.edits-invoking-workflow }}
         run: |
           set -euo pipefail
           # The timestamp is interpolated into the filter, NOT passed with
@@ -684,6 +723,25 @@ jobs:
           inline="$(gh api "repos/${REPO}/pulls/${PR}/comments" --paginate --slurp \
             | jq "[.[][] | select(.user.type == \"Bot\" and (.user.login | test(\"claude\"; \"i\")) and (.updated_at >= \"${SINCE}\"))] | length")"
           total=$((comments + reviews + inline))
+          if [ "$total" -eq 0 ] && [ "${EDITS_INVOKING_WORKFLOW:-false}" = "true" ]; then
+            # The reviewer never ran, so there is nothing to diagnose about it.
+            {
+              echo "### Claude review could not run"
+              echo
+              echo "This pull request edits the workflow that invokes the reviewer,"
+              echo "and the action refuses to run when that file differs from the"
+              echo "copy on the default branch. It skipped itself and posted"
+              echo "nothing; the review step's log ends in \"Exiting due to"
+              echo "workflow validation skip\"."
+              echo
+              echo "Nothing here is fixable in this pull request, and the diff is"
+              echo "not the problem. **This PR is UNREVIEWED and needs a human**"
+              echo "review, which is why this job is red rather than skipped:"
+              echo "changes to CI are the ones least safe to wave through."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Reviewer refused to run because this PR edits the invoking workflow; this PR is unreviewed and needs a human review." >&2
+            exit 1
+          fi
           if [ "$total" -eq 0 ]; then
             {
               echo "### Claude review posted nothing"
