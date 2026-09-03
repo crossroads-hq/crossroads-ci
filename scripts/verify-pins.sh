@@ -2,9 +2,11 @@
 #
 # Report which version of the control plane each fleet repository pins.
 #
-# scripts/verify-fleet.sh proves the fleet's RULESETS still match governance/.
-# This proves the other half: that the shared gate and workflow logic the fleet
-# actually runs is the logic in this repository. SHA pinning is the fleet's
+# Rulesets are the org's problem now, targeted by the `fleet-profile` custom
+# property; scripts/audit-fleet-drift.sh reports what escapes that inheritance.
+# This proves the other half, which inheritance cannot reach: that the shared
+# gate and workflow logic the fleet actually runs is the logic in this
+# repository. SHA pinning is the fleet's
 # convention and the right one -- a mutable @main would let an unreviewed
 # change here reach every repository at once -- but it trades content drift for
 # version drift, and nothing measured the second until now.

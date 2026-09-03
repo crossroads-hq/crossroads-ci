@@ -1,4 +1,4 @@
-# Weekly inverse of verify-fleet.sh: not "does each repository carry the right
+# Weekly inverse of the retired verify-fleet.sh: not "does each repository carry the right
 # ruleset" -- org rulesets make that unaskable -- but "is anything ESCAPING
 # inheritance?"
 #
