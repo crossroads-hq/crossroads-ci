@@ -105,6 +105,17 @@ on:
         type: number
         required: false
         default: 30
+      show-reviewer-output:
+        description: >-
+          Disable the action's redaction of the model's result text, so the
+          reviewer's own account of what it did reaches the Actions log. Off by
+          default and meant to be switched on for ONE consumer at a time while
+          a specific failure is being diagnosed: the log is org-visible, so
+          this exposes the full transcript of every review in whichever
+          repository sets it. Turn it back off once the failure is understood.
+        type: boolean
+        required: false
+        default: false
     secrets:
       claude-code-oauth-token:
         description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
@@ -602,6 +613,26 @@ jobs:
         uses: anthropics/claude-code-action@fa2b2666b747000bf42767d1f332065b375e3c8f # v1.0.214
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
+          # Off unless a consumer asks for it. 74b8b5c hardcoded this true to
+          # diagnose the instant is_error:true death and c0855ad removed it;
+          # bumping the action to v1.0.214 in e041bef fixed that failure, and
+          # the reviewer now genuinely runs -- five and a half minutes on
+          # crossroads-ui#237, step conclusion success.
+          #
+          # What fails now is delivery: the reviewer finishes and posts
+          # nothing, so "Confirm a review actually reached the pull request"
+          # fails on silence, exactly as designed. Ruled out already:
+          # permissions (the caller grants pull-requests: write), turn
+          # exhaustion (120 turns and a 30-minute step bound against a 5m29s
+          # run), and any incapacity of the action itself, which posted
+          # normally on crossroads-ci#35.
+          #
+          # Hardcoding it true again would drop redaction for every review in
+          # every consumer at once, and the Actions log is org-visible. As an
+          # input it can be switched on for the ONE repository being
+          # diagnosed -- crossroads-ui, where delivery fails -- and left off
+          # everywhere else.
+          show_full_output: ${{ inputs.show-reviewer-output }}
           # This is AGENT mode: `prompt:` is set and track_progress defaults to
           # false. In agent mode nothing is granted implicitly -- a prompt can
           # ask for twenty inline comments and the model will have no tool able
