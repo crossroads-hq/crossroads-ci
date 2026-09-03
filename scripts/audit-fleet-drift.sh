@@ -160,7 +160,7 @@ else
           unknown) info "\`$r/$f\` pins \`${sha:0:8}\` — could not compare against \`$CONTROL_PLANE\` main." ;;
           *) fail "\`$r/$f\` pins \`${sha:0:8}\`, which is not an ancestor of \`$CONTROL_PLANE\` main (status: $st). Abandoned or rewritten pin." ;;
         esac
-      done < <(grep -oE "$ORG/$CONTROL_PLANE[^@]*@[0-9a-f]{40}" <<<"${body:-}" | grep -oE "[0-9a-f]{40}$" | sort -u || true)
+      done < <(grep -oE "${ORG}/${CONTROL_PLANE}[^@]*@[0-9a-f]{40}" <<<"${body:-}" | grep -oE "[0-9a-f]{40}$" | sort -u || true)
     done <<<"$files"
   done
 fi
