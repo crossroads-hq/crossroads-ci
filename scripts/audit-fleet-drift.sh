@@ -6,7 +6,7 @@
 # its profile prescribes?" Under org rulesets targeting a custom property that
 # stopped being answerable -- the org answers it, there is no per-repository
 # ruleset to compare, and the script reported DIVERGED for the whole fleet. It
-# was removed 2026-09-04; this is the question that replaced it.
+# was removed 2026-09-03; this is the question that replaced it.
 #
 # Each check below exists because the thing it looks for actually happened
 # during the 2026-09 migration, and each was invisible until someone looked:

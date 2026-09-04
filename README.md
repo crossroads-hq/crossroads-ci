@@ -40,7 +40,7 @@ reaction-only results take the lower-cost Claude Sonnet fallback path.
 
 ## Retired: `verify-fleet.sh`
 
-Removed 2026-09-04. It asked "does every repository carry the repo-level
+Removed 2026-09-03. It asked "does every repository carry the repo-level
 ruleset its profile prescribes?" Under org rulesets targeting the
 `fleet-profile` custom property there is no repo-level ruleset to find, so it
 answered `DIVERGED` for every repository in the fleet and exited 1 on a
