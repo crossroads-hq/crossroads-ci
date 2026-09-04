@@ -22,6 +22,7 @@ Here, the JSON profiles are the only copy.
 | `governance/tag-ruleset.json` | `v*` release tags immutable, for repositories that publish from a tag push. |
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on anything **uncheckable** — a pin naming a commit this repo lacks, a repository whose workflows could not be read, or a gate-requiring profile with no workflows. `STRICT=1` also fails on anything **not current** — behind, unpinned, or diverged from the base — or still addressing the pre-migration owner, which is counted separately so one pin cannot land in both totals. |
+| `scripts/verify-org-rulesets.sh` | Prove the three **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
@@ -49,13 +50,14 @@ that replaced it: what is ESCAPING inheritance.
 
 Two things this leaves standing, both of which matter more than the script did:
 
-**Nothing checks the org rulesets against the checked-in profiles.** The
-question `verify-fleet.sh` was built for is still a real one — it just moved up
-a level, from per-repository to per-org. It went unasked long enough for
+**`scripts/verify-org-rulesets.sh` asks that question at the level it moved
+to.** `verify-fleet.sh` compared each repository against a profile; that became
+unanswerable under org rulesets, and for a while nobody asked whether the three
+org rulesets THEMSELVES still matched `governance/`. Long enough for
 `Fleet — minimal protection` to sit at `enforcement: evaluate` while
-`governance/ruleset-minimal.json` said `active`, so every `minimal` repository
-was unprotected and every script reported clean. Found by hand on 2026-09-03
-and corrected; still nothing automated would catch its return.
+`governance/ruleset-minimal.json` said `active` — every `minimal` repository
+unprotected, every script reporting clean. Found by hand on 2026-09-03; the new
+check is what finds it next time, and it found a second drift on its first run.
 
 **`apply-fleet.sh` is the other half of the same retired generation.** It
 writes REPO-LEVEL rulesets to every entry in `governance/repositories.txt`.
@@ -71,6 +73,7 @@ its output before letting `APPLY=1` near it.
 scripts/validate-local.sh           # preflight before push
 scripts/apply-fleet.sh              # plan (default; mutates nothing)
 APPLY=1 scripts/apply-fleet.sh      # apply
+scripts/verify-org-rulesets.sh      # org rulesets vs governance/; nonzero on drift
 scripts/verify-pins.sh              # which control-plane version each repo runs
 ```
 
