@@ -193,6 +193,25 @@ while IFS='|' read -r profile_file name prop values ref; do
     echo "  DIVERGED: targets refs [${got_ref:-none}], expected [${ref}]"
     status=1
   fi
+
+  # And nothing carved OUT of that targeting. `include` alone answers "does
+  # this ruleset point at the fleet?"; it cannot answer "at ALL of it". An
+  # exclude added live -- one repository lifted out of `full`, one ref pattern
+  # spared -- leaves every rule, every parameter and every include identical,
+  # so this script would print `ok` about a ruleset protecting strictly less
+  # than governance/ says. Same invisible drift the includes are checked for,
+  # approached from the other side.
+  #
+  # Asserted empty rather than compared: the profile JSON predates property
+  # targeting and has nowhere to record an expected exclude list. A deliberate
+  # carve-out therefore has to be recorded here, in a reviewed file, which is
+  # the right place for a governance exception anyway.
+  got_excl="$(jq -r '[(.conditions.repository_property.exclude[]? | .name),
+                      (.conditions.ref_name.exclude[]?)] | join(",")' <<<"$live")"
+  if [ -n "$got_excl" ]; then
+    echo "  DIVERGED: carves out [${got_excl}] — this ruleset protects less than the profile describes"
+    status=1
+  fi
 done <<EOF
 $(profiles)
 EOF
