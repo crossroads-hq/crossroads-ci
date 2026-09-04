@@ -94,7 +94,18 @@ canon() {
   # wrong. `walk` sorts every array at every depth; `tostring` gives arrays of
   # objects a stable key without naming their fields, so a rule type this
   # script has never seen still normalises.
-  jq -S 'def norm: walk(if type == "array" then sort_by(tostring) else . end);
+  # Object keys are sorted in the SAME walk, and that ordering is load-bearing
+  # rather than cosmetic. `tostring` serialises an object in its own
+  # key-insertion order, and `-S` only sorts keys on the final print, not in
+  # the string used as a sort key -- so two identical sets of multi-key objects
+  # listed with different key order sorted into different positions and
+  # compared as drift. `walk` is bottom-up, so canonicalising each object's
+  # keys here means an array's children are already canonical by the time the
+  # array uses `tostring` on them.
+  jq -S 'def norm: walk(
+    if type == "object" then (to_entries | sort_by(.key) | from_entries)
+    elif type == "array" then sort_by(tostring)
+    else . end);
   {
     target,
     enforcement,
