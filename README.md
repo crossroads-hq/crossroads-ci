@@ -21,7 +21,6 @@ Here, the JSON profiles are the only copy.
 | `governance/ruleset-minimal.json` | Protection for repositories with no CI — everything except the status check. Exists so "no CI yet" stops meaning "no protection at all". |
 | `governance/tag-ruleset.json` | `v*` release tags immutable, for repositories that publish from a tag push. |
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
-| `scripts/verify-fleet.sh` | Prove the fleet still matches the profiles. Exit 1 on drift. |
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on anything **uncheckable** — a pin naming a commit this repo lacks, a repository whose workflows could not be read, or a gate-requiring profile with no workflows. `STRICT=1` also fails on anything **not current** — behind, unpinned, or diverged from the base — or still addressing the pre-migration owner, which is counted separately so one pin cannot land in both totals. |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
@@ -39,13 +38,39 @@ current head or the exact official Codex bot's structured clean-review comment
 whose reviewed-commit marker resolves uniquely to the current head. Other comments and
 reaction-only results take the lower-cost Claude Sonnet fallback path.
 
+## Retired: `verify-fleet.sh`
+
+Removed 2026-09-03. It asked "does every repository carry the repo-level
+ruleset its profile prescribes?" Under org rulesets targeting the
+`fleet-profile` custom property there is no repo-level ruleset to find, so it
+answered `DIVERGED` for every repository in the fleet and exited 1 on a
+correctly-configured fleet. `scripts/audit-fleet-drift.sh` asks the question
+that replaced it: what is ESCAPING inheritance.
+
+Two things this leaves standing, both of which matter more than the script did:
+
+**Nothing checks the org rulesets against the checked-in profiles.** The
+question `verify-fleet.sh` was built for is still a real one — it just moved up
+a level, from per-repository to per-org. It went unasked long enough for
+`Fleet — minimal protection` to sit at `enforcement: evaluate` while
+`governance/ruleset-minimal.json` said `active`, so every `minimal` repository
+was unprotected and every script reported clean. Found by hand on 2026-09-03
+and corrected; still nothing automated would catch its return.
+
+**`apply-fleet.sh` is the other half of the same retired generation.** It
+writes REPO-LEVEL rulesets to every entry in `governance/repositories.txt`.
+Running it against the current fleet would recreate, fleet-wide, exactly the
+repo-ruleset-shadows-org condition `audit-fleet-drift.sh` reports as MUST FIX.
+It is still here because bootstrapping a repository before the org property is
+set is a real case, but it is no longer the way the fleet is governed — read
+its output before letting `APPLY=1` near it.
+
 ## Usage
 
 ```sh
 scripts/validate-local.sh           # preflight before push
 scripts/apply-fleet.sh              # plan (default; mutates nothing)
 APPLY=1 scripts/apply-fleet.sh      # apply
-scripts/verify-fleet.sh             # ruleset drift; nonzero exit on divergence
 scripts/verify-pins.sh              # which control-plane version each repo runs
 ```
 

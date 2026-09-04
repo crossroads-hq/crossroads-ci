@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Ask the inverse of verify-fleet.sh.
+# Ask what is ESCAPING inheritance.
 #
-# verify-fleet.sh asked "does every repository carry the ruleset its profile
-# prescribes?" Under org rulesets targeting a custom property that is no longer
-# a question worth asking -- the org answers it, and it cannot drift per
-# repository. The useful question became "is anything ESCAPING inheritance?"
+# The retired verify-fleet.sh asked "does every repository carry the ruleset
+# its profile prescribes?" Under org rulesets targeting a custom property that
+# stopped being answerable -- the org answers it, there is no per-repository
+# ruleset to compare, and the script reported DIVERGED for the whole fleet. It
+# was removed 2026-09-03; this is the question that replaced it.
 #
 # Each check below exists because the thing it looks for actually happened
 # during the 2026-09 migration, and each was invisible until someone looked:
@@ -24,8 +25,8 @@
 #     does not hold -- still owned by the pre-migration account -- and
 #     verify-pins.sh read each 404 as "no workflows (minimal: expected)".
 #     Two repositories the org governs by custom property were absent from
-#     the reviewed list, so apply-fleet.sh, verify-fleet.sh and verify-pins.sh
-#     all skipped them. Neither list could see either fault alone.
+#     the reviewed list, so apply-fleet.sh and verify-pins.sh both skipped
+#     them. Neither list could see either fault alone.
 #
 # Which list drives what: governance/repositories.txt, the REVIEWED fleet, is
 # what every check below the classification section walks -- taking that list
@@ -63,7 +64,7 @@ try() { gh api "$@" 2>/dev/null || return 1; }
 # `?per_page=100` list silently truncates at 100 and the audit reports "no
 # drift" for everything past it -- the same failure as aborting early, just
 # quiet instead of loud. --slurp yields an array of pages, flattened with
-# `.[][]` by callers, matching verify-fleet.sh's existing house pattern.
+# `.[][]` by callers, the house pattern the fleet scripts share.
 tryp() { gh api --paginate --slurp "$@" 2>/dev/null || return 1; }
 
 # Both runs-on spellings must be seen. Only the flow form was scanned at
@@ -98,8 +99,8 @@ say ""
 #
 # TWO lists, deliberately, and the difference between them is a finding.
 #
-# governance/repositories.txt is the REVIEWED fleet: the list apply-fleet.sh,
-# verify-fleet.sh and verify-pins.sh already read, and the one a change has to
+# governance/repositories.txt is the REVIEWED fleet: the list apply-fleet.sh
+# and verify-pins.sh already read, and the one a change has to
 # pass a governance decision to reach. Every check below the classification
 # section asks a question about the GOVERNED fleet, so it walks that list.
 # Taking the roster from the org API instead made this script a second,
@@ -121,8 +122,8 @@ repos_json="$(tryp "orgs/$ORG/repos?per_page=100" | jq '[.[][]]')" || {
 org_live="$(jq -r '.[] | select(.archived == false) | .name' <<<"$repos_json")"
 org_all="$(jq -r '.[] | .name' <<<"$repos_json")"
 
-# Parsed the way verify-fleet.sh and verify-pins.sh already parse it, so the
-# three scripts cannot disagree about what the file means. Held as a
+# Parsed the way apply-fleet.sh and verify-pins.sh already parse it, so the
+# scripts cannot disagree about what the file means. Held as a
 # tab-separated string rather than an associative array: those are bash 4+,
 # macOS ships 3.2, and this script is meant to run by hand as well as in CI.
 roster=""
@@ -189,8 +190,8 @@ else
 
     # Governed by the org, absent from the reviewed list. The org ruleset
     # protects it, so nothing looks wrong from GitHub's side -- but
-    # apply-fleet.sh, verify-fleet.sh and verify-pins.sh all walk the reviewed
-    # list, so no script this repository ships ever checks it.
+    # apply-fleet.sh and verify-pins.sh both walk the reviewed list, so no
+    # script this repository ships ever checks it.
     if ! grep -qxF "$_r" <<<"$roster_names"; then
       fail "\`$_r\` carries \`fleet-profile=$profile\` but is not in ${fleet_file}, so every script that walks the reviewed list skips it. Add it with a profile, or set the property to \`none\` if it is deliberately ungoverned."
       continue
