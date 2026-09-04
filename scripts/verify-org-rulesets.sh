@@ -80,11 +80,21 @@ PROFILES
 
 # Reduce a ruleset to what actually decides whether a push is refused.
 #
-# `dismissal_restriction` is dropped ONLY when disabled. GitHub echoes
-# `{allowed_actors: [], enabled: false}` on some reads and omits it on others
-# for the same effective policy, so comparing it verbatim reports drift that
-# does not exist -- while an ENABLED restriction is a real difference and
-# survives.
+# `dismissal_restriction` is dropped ONLY when disabled, and that branch is
+# DEFENSIVE rather than load-bearing -- worth saying, because it is easy to
+# mistake for a field this script has actually seen.
+#
+# Where it WAS observed: repo-level rulesets. `repos/<o>/<r>/rulesets/21284013`
+# returned `{enabled: false, allowed_actors: []}` on 2026-09-03, while the same
+# ruleset recreated from that snapshot returned the field ABSENT for identical
+# effective policy. Same endpoint, same policy, two shapes -- which cost two
+# false diffs comparing those by hand.
+#
+# This script reads ORG rulesets, and neither they nor governance/*.json carry
+# the field at all today, so the branch never fires here. It stays because the
+# inconsistency is GitHub's and observed rather than hypothetical: if an org
+# read ever echoes it, the profile will not, and that is a false DIVERGED. An
+# ENABLED restriction is a real difference and still survives.
 canon() {
   # Every array here is a SET: allowed_merge_methods, required_status_checks
   # contexts, bypass_actors, ref_name includes. None carries meaning in its
