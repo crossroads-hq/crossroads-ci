@@ -86,20 +86,35 @@ PROFILES
 # does not exist -- while an ENABLED restriction is a real difference and
 # survives.
 canon() {
-  jq -S '{
+  # Every array here is a SET: allowed_merge_methods, required_status_checks
+  # contexts, bypass_actors, ref_name includes. None carries meaning in its
+  # order, and GitHub does not promise to return them in the order the profile
+  # JSON lists them -- so an unsorted compare reports drift that is not there,
+  # on a check whose whole value is that it only speaks when something is
+  # wrong. `walk` sorts every array at every depth; `tostring` gives arrays of
+  # objects a stable key without naming their fields, so a rule type this
+  # script has never seen still normalises.
+  jq -S 'def norm: walk(if type == "array" then sort_by(tostring) else . end);
+  {
     target,
     enforcement,
-    bypass_actors: (.bypass_actors // []),
+    bypass_actors: ((.bypass_actors // []) | norm),
     rules: (.rules // [] | sort_by(.type) | map({
       type,
       parameters: ((.parameters // {})
         | if has("dismissal_restriction") and .dismissal_restriction.enabled == false
-          then del(.dismissal_restriction) else . end)
+          then del(.dismissal_restriction) else . end
+        | norm)
     }))
   }'
 }
 
-org_json="$(gh api "orgs/$ORG/rulesets" 2>/dev/null)" || {
+# Paginated. `gh api` fetches ONE page unless told otherwise, so an org past
+# the default page size would hide rulesets past it -- and a ruleset this
+# script cannot see reads as "no org ruleset named X", which is a MUST FIX
+# pointing at the wrong thing. --slurp yields an array of pages, flattened
+# with `.[][]`, the same house pattern audit-fleet-drift.sh uses.
+org_json="$(gh api --paginate --slurp "orgs/$ORG/rulesets" 2>/dev/null | jq '[.[][]]')" || {
   echo "Could not list rulesets for '$ORG'. The token needs org read access." >&2
   exit 1
 }
@@ -129,15 +144,18 @@ while IFS='|' read -r profile_file name prop values ref; do
     continue
   }
 
-  # Substance.
-  if diff -u <(canon < "$profile_file") <(canon <<<"$live") > /tmp/org-ruleset-diff.$$ 2>&1; then
+  # Substance. mktemp, not a `$$`-suffixed literal: /tmp is shared and
+  # world-writable, and a predictable name is one a concurrent process can
+  # pre-create as a symlink for this redirect to follow.
+  diff_out="$(mktemp)"
+  if diff -u <(canon < "$profile_file") <(canon <<<"$live") > "$diff_out" 2>&1; then
     echo "  ok: rules, parameters, enforcement and bypass match"
   else
     echo "  DIVERGED: live ruleset ${id} differs from the profile:"
-    sed -e 's/^/    /' -e '1,2d' /tmp/org-ruleset-diff.$$
+    sed -e 's/^/    /' -e '1,2d' "$diff_out"
     status=1
   fi
-  rm -f /tmp/org-ruleset-diff.$$
+  rm -f "$diff_out"
 
   # Targeting. Perfect rules pointed at nothing protect nothing.
   want_values="$(printf '%s' "$values" | tr ',' '\n' | sort | paste -sd, -)"
