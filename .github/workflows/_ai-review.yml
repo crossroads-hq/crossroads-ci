@@ -87,8 +87,14 @@ on:
           `["self-hosted","fast"]`. A JSON string rather than a plain label
           because `runs-on` needs a LIST for a self-hosted target and Actions
           gives an input no list type; `fromJSON` on a string is the only
-          form that expresses both. Matches the caller-side convention in
-          crossroads-ui's runner-diagnostics workflow.
+          form that expresses both. The JSON-string shape is the same one
+          crossroads-ui's runner-diagnostics workflow uses; the NAME is not.
+          That one is `runner_labels`, underscored, on a stated belief that
+          "GitHub Expressions parses `inputs.runner-labels` as subtraction".
+          It does not: every input in this file and in _supply-chain.yml is
+          hyphenated and has resolved in production for as long as they have
+          existed, and this one resolved to `["self-hosted","fast"]` on
+          crossroads-ui#299. Kept hyphenated to match its neighbours here.
 
           Defaults to GitHub-hosted, so every existing caller is unchanged.
           Point it at the fleet from a PRIVATE caller, where hosted minutes
