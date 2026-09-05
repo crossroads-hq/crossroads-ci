@@ -59,8 +59,8 @@ on:
           which gates its job on `head.repo.full_name == github.repository`,
           none of these three has a same-repo guard -- `gitleaks` has no
           `if:` at all -- so a fork PR schedules work on whatever runner
-          this input names: a full-history checkout, a binary download, and
-          a container-based scanner, all over a branch a stranger wrote. On
+          this input names: a full-history checkout and two binary
+          downloads, all over a branch a stranger wrote. On
           a GitHub-hosted runner that is a throwaway VM; on a persistent
           self-hosted one it is the exposure GitHub's own documentation
           warns about. The guard is deliberately NOT added here -- it would
@@ -68,12 +68,15 @@ on:
           point -- which is exactly why the constraint lands on this input
           instead.
 
-          Two further requirements on the target, neither checked here:
-          Linux (the gitleaks step fetches a `linux_x64` tarball and shells
-          out to `sha256sum`), and a working Docker daemon when `osv-scan`
-          is on, because osv-scanner-action is a container action. A runner
-          missing Docker fails the lockfile job rather than skipping it --
-          verify before moving a caller that sets `osv-scan: true`.
+          One further requirement on the target, not checked here: Linux on
+          x86-64. Both scanners are fetched as pinned binaries -- gitleaks
+          as a `linux_x64` tarball, osv-scanner as a `linux_amd64`
+          executable -- and both verify with `sha256sum`.
+
+          Docker is NOT required. It was, while the lockfile job ran
+          osv-scanner-action, a container action; that was the one thing
+          keeping these jobs off a self-hosted fleet without a daemon, and
+          it is why the job now runs the binary directly.
         type: string
         required: false
         default: '["ubuntu-latest"]'
