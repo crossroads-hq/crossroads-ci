@@ -114,15 +114,66 @@ jobs:
         with:
           persist-credentials: false
 
+      # The osv-scanner BINARY, not osv-scanner-action. The action is a
+      # CONTAINER action, so it needs a docker daemon on the runner -- which
+      # GitHub-hosted runners have and the fleet does not (measured
+      # 2026-09-05 on wsl-fleet-3: docker MISSING, daemon NOT REACHABLE).
+      # That single dependency was the only thing keeping these jobs on paid
+      # runners, so it is cheaper to drop it than to install docker on every
+      # runner the fleet will ever have.
+      #
+      # Same treatment as gitleaks below, for the same reason and in the same
+      # shape: executable input gets pinned by version AND release checksum.
+      # A raw binary here, not a tarball -- osv-scanner publishes bare
+      # per-platform executables and one SHA256SUMS file.
+      #
+      # linux_amd64 matches every runner in play (hosted ubuntu-latest and the
+      # X64 fleet); an arm64 runner would need a second case here, exactly as
+      # gitleaks' linux_x64 would.
+      #
+      # Exit codes, measured against v2.5.1 rather than assumed:
+      #   0   scan completed, nothing found
+      #   1   vulnerabilities found -- the failure this job exists to raise
+      #   128 no package sources found
+      # 128 stays fatal, which is what the action did: it is the "empty scan
+      # set" case the `osv-scan` input already tells such callers to turn off.
+      # It is named explicitly because a bare 128 is precisely the kind of
+      # opaque CI failure that costs an hour to diagnose.
       - name: Scan lockfiles against OSV
         if: inputs.osv-scan
-        # The SUBDIRECTORY action, not the repository root: the root action.yml
-        # at this tag is a metadata stub with no `runs:` section and fails to
-        # load. Verified: osv-scanner-action/action.yml carries the docker
-        # `runs:` at v2.5.1.
-        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
-        with:
-          scan-args: --recursive .
+        env:
+          OSV_VERSION: 2.5.1
+          OSV_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
+        run: |
+          set -euo pipefail
+          curl -sSfL --retry 3 -o "${RUNNER_TEMP}/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  ${RUNNER_TEMP}/osv-scanner" | sha256sum -c -
+          chmod +x "${RUNNER_TEMP}/osv-scanner"
+
+          set +e
+          "${RUNNER_TEMP}/osv-scanner" scan source --recursive .
+          osv_status=$?
+          set -e
+
+          case "$osv_status" in
+            0) ;;
+            1)
+              echo "osv-scanner found known vulnerabilities in a lockfile (listed above)." >&2
+              exit 1
+              ;;
+            128)
+              echo "osv-scanner found no package sources to scan under '.'." >&2
+              echo "A repository with no lockfiles should set \`osv-scan: false\` rather" >&2
+              echo "than fail this job on every pull request." >&2
+              exit 1
+              ;;
+            *)
+              echo "osv-scanner exited ${osv_status}, which is neither a clean scan," >&2
+              echo "a finding, nor an empty scan set. Treating as a failure." >&2
+              exit 1
+              ;;
+          esac
 
       - name: Audit lockfile
         if: inputs.npm-audit
