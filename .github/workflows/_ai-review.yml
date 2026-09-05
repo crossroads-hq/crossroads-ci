@@ -238,6 +238,72 @@ jobs:
           fi
           echo "Review budget fits: ${codex_minutes}m Codex wait + ${REVIEW_TIMEOUT}m review + ${OVERHEAD_MARGIN}m overhead = ${needed}m of ${JOB_TIMEOUT}m." >> "$GITHUB_STEP_SUMMARY"
 
+      # Every step below this one shells out to `jq`, and most to `gh`. A
+      # GitHub-hosted runner ships both; a self-hosted one need not, and
+      # `runner-labels` is a standing invitation to one that does not.
+      #
+      # A hard preflight rather than per-step handling, because the failure it
+      # prevents is SILENT rather than loud. `Detect whether this pull request
+      # edits the invoking workflow` and the head-SHA dedup both call jq inside
+      # an `if` condition, under `bash -e` without pipefail -- where a missing
+      # binary is not an error but a FALSE CONDITION. Measured on
+      # crossroads-ui#299 (2026-09-05, wsl-fleet-3): three `jq: command not
+      # found` lines, and the two steps that hit the first two both reported
+      # success. The anti-tamper guard wrote `edits-invoking-workflow=false`
+      # for a pull request that did edit the invoking workflow; only the third,
+      # outside an `if`, failed the job. A guard that answers "no" when it
+      # cannot answer at all is worse than one that is absent.
+      #
+      # gh 2.53 is where `api --slurp` landed. Below it the Codex wait
+      # degrades to a warning and the reviewer proceeds against a head whose
+      # review state it could not read -- also measured on that run.
+      - name: Check the runner carries the tools the steps below assume
+        env:
+          GH_MIN: "2.53.0"
+        run: |
+          set -euo pipefail
+
+          problems=""
+          note() { problems="${problems}${problems:+$'\n'}- $1"; }
+
+          for tool in jq gh; do
+            command -v "$tool" >/dev/null 2>&1 || note "\`${tool}\` is not on PATH."
+          done
+
+          # Only meaningful if gh resolved at all; `gh --version` prints
+          # "gh version 2.62.0 (2024-11-14)".
+          if command -v gh >/dev/null 2>&1; then
+            gh_version="$(gh --version 2>&1 | sed -n 's/.*gh version \([0-9][0-9.]*\).*/\1/p' | head -n 1)"
+            if [ -z "$gh_version" ]; then
+              note "Could not parse a version out of \`gh --version\`."
+            elif [ "$(printf '%s\n%s\n' "$GH_MIN" "$gh_version" | sort -V | head -n 1)" != "$GH_MIN" ]; then
+              note "\`gh\` is ${gh_version}; ${GH_MIN} or newer is required for \`api --slurp\`."
+            fi
+          fi
+
+          if [ -n "$problems" ]; then
+            {
+              echo "### Runner is missing tools this reviewer requires"
+              echo
+              echo "$problems"
+              echo
+              echo "A GitHub-hosted runner carries these; this job was pointed at a"
+              echo "runner that does not. Two of the steps below call \`jq\` inside an"
+              echo "\`if\` condition, so a missing \`jq\` does not fail them -- it makes"
+              echo "them answer \"no\", silently passing the guard that refuses to review"
+              echo "a pull request which edits the invoking workflow. Refusing to start"
+              echo "instead."
+              echo
+              echo "Install the tools on the runner, or drop \`runner-labels\` for this"
+              echo "caller so the job runs on a GitHub-hosted runner again."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Runner is missing required tooling; refusing to start." >&2
+            printf '%s\n' "$problems" >&2
+            exit 1
+          fi
+
+          echo "Runner tooling present: jq $(jq --version 2>&1), $(gh --version 2>&1 | head -n 1)." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Detect reviewable changes
         id: changes
         # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
