@@ -374,13 +374,43 @@ jobs:
           wf_path="${wf_path#*/}"
           wf_path="${wf_path#*/}"
 
-          if gh api "repos/${REPO}/pulls/${PR}/files" --paginate --slurp \
-              | jq -e --arg p "$wf_path" 'any(.[][]; .filename == $p)' >/dev/null; then
-            echo "edits-invoking-workflow=true" >> "$GITHUB_OUTPUT"
-            echo "This pull request edits ${wf_path}, the workflow that invokes the reviewer, so the reviewer action will refuse to run." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "edits-invoking-workflow=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Two statements, not one `if` over a pipeline. This was
+          # `if gh ... | jq -e ...; then true else false fi`, where EVERY
+          # failure -- gh unreachable, gh too old for --slurp, jq absent, a
+          # malformed response -- took the else branch and recorded that the
+          # pull request does not edit the invoking workflow. Measured on
+          # crossroads-ui#299: jq was missing, the step reported success, and
+          # the guard cleared a pull request it had never inspected. A guard
+          # that answers "no" when it cannot answer is worse than none.
+          #
+          # The fetch is an assignment, so `set -e` fails the job on a gh
+          # error instead of feeding an empty string forward.
+          files_json="$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate --slurp)"
+
+          # `jq -e` separates the ANSWER from a FAILURE: 0 when the filter
+          # yielded true, 1 when it yielded false or null, and anything else
+          # (2 system, 3 compile, 5 runtime, 127 absent) when jq could not
+          # answer at all. Only the first two are verdicts.
+          set +e
+          printf '%s' "$files_json" \
+            | jq -e --arg p "$wf_path" 'any(.[][]; .filename == $p)' >/dev/null
+          jq_status=$?
+          set -e
+
+          case "$jq_status" in
+            0)
+              echo "edits-invoking-workflow=true" >> "$GITHUB_OUTPUT"
+              echo "This pull request edits ${wf_path}, the workflow that invokes the reviewer, so the reviewer action will refuse to run." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              echo "edits-invoking-workflow=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Could not determine whether this pull request edits ${wf_path}: jq exited ${jq_status}." >&2
+              echo "Refusing to review rather than assuming it does not." >&2
+              exit 1
+              ;;
+          esac
 
       - name: Check whether Claude already reviewed this head SHA
         id: dedup
@@ -413,10 +443,24 @@ jobs:
           wf_path="${wf_path#*/}"         # repo/.github/workflows/x.yml
           wf_path="${wf_path#*/}"         # .github/workflows/x.yml
 
+          # Hoisted out of the `for` list. `for rid in $(gh ... | jq ...)`
+          # discards the substitution's exit status even under `set -e`, so
+          # any failure -- gh unreachable, jq absent -- yielded an EMPTY list,
+          # therefore zero prior reviews, therefore a fresh review. That
+          # direction is not unsafe, but it is not free: the silent outcome is
+          # paying for a duplicate review of an already-reviewed head, in the
+          # one workflow whose cost is the reason it exists. An assignment is
+          # checked, so the same failure now stops the job.
+          run_ids="$(gh api "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --paginate --slurp \
+            | jq -r --arg p "$wf_path" '.[].workflow_runs[] | select(.path == $p) | .id')"
+
           prior_claude=0
-          for rid in $(gh api "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-              --paginate --slurp \
-              | jq -r --arg p "$wf_path" '.[].workflow_runs[] | select(.path == $p) | .id'); do
+          # A here-string keeps the loop in this shell, so the counter below
+          # survives it; `$(...)` word-splitting would not need that, but this
+          # also tolerates an empty list without iterating once on "".
+          while IFS= read -r rid; do
+            [ -n "$rid" ] || continue
             n="$(gh api "repos/${REPO}/actions/runs/${rid}/jobs" --paginate --slurp \
               | jq '[.[].jobs[]
                        | select((.name | endswith("AI review")) and .conclusion == "success")
@@ -425,7 +469,7 @@ jobs:
                            .conclusion == "success"))]
                     | length')"
             prior_claude=$((prior_claude + n))
-          done
+          done <<< "$run_ids"
 
           if [ "${prior_claude:-0}" -gt 0 ]; then
             echo "Head ${HEAD_SHA} already has a confirmed Claude review; skipping." >> "$GITHUB_STEP_SUMMARY"
