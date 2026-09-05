@@ -29,7 +29,7 @@ Here, the JSON profiles are the only copy.
 | `actions/await-codex-review` | Verifies that the exact official Codex account produced a formal review or structured clean-review comment for the pull request's current head. Abbreviated reviewed-commit markers are resolved to a unique full Git object ID before comparison; stale, ambiguous, pending, dismissed, or spoofed evidence does not suppress the fallback. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
-| `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. |
+| `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. Keeps the model transcript redacted while surfacing a capped, credential-redacted terminal message for pre-inference API failures. |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
 
 A Codex thumbs-up reaction never suppresses Claude: reactions carry no head SHA,
