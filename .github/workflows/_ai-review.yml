@@ -113,6 +113,7 @@ on:
           a specific failure is being diagnosed: the log is org-visible, so
           this exposes the full transcript of every review in whichever
           repository sets it. Turn it back off once the failure is understood.
+          Pre-inference API errors are reported safely without enabling this.
         type: boolean
         required: false
         default: false
@@ -690,6 +691,72 @@ jobs:
             silence, because a reviewer that finds nothing and says nothing is
             indistinguishable from a reviewer that could not post at all. A
             clean diff is a result worth posting.
+
+      # claude-code-action deliberately suppresses the terminal result text
+      # when show_full_output is false. That is the right default for a model
+      # transcript, but Claude Code currently reports some pre-inference API
+      # failures as subtype=success plus is_error=true; the only useful cause
+      # is then in the suppressed `result` string. crossroads-ui#287 produced
+      # this exact shape twice: one turn, zero cost, empty model usage, and no
+      # permission denial. The action's generic error left rate limit, auth,
+      # and provider failure indistinguishable.
+      #
+      # Read only the terminal result from the action's execution file, and
+      # only for the pre-inference API-error shape. Never print assistant or
+      # tool messages. Credential-shaped strings are masked, control characters
+      # are flattened, and the diagnostic is capped before it reaches the
+      # org-visible log. Full transcript output remains off by default.
+      - name: Expose sanitized Claude API rejection
+        if: ${{ steps.review.outcome == 'failure' }}
+        env:
+          EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$EXECUTION_FILE" ]; then
+            exit 0
+          fi
+
+          if ! diagnostic="$(jq -r '
+            [
+              .[]
+              | select(
+                  .type == "result" and
+                  .subtype == "success" and
+                  .is_error == true and
+                  (.total_cost_usd // 0) == 0 and
+                  ((.modelUsage // {}) | length) == 0 and
+                  ((.result // "") | startswith("API Error:"))
+                )
+            ]
+            | last
+            | (.result // empty)
+            | gsub("[\u0000-\u001f\u007f]"; " ")
+            | .[0:500]
+          ' "$EXECUTION_FILE" 2>/dev/null)"; then
+            echo "::warning::Claude execution output could not be parsed; the transcript remains hidden."
+            exit 0
+          fi
+
+          if [ -z "$diagnostic" ]; then
+            exit 0
+          fi
+
+          diagnostic="$(printf '%s' "$diagnostic" | sed -E \
+            -e 's/sk-ant-[A-Za-z0-9_-]+/[REDACTED]/g' \
+            -e 's/gh[pousr]_[A-Za-z0-9_]+/[REDACTED]/g' \
+            -e 's/(Bearer )[A-Za-z0-9._~+\/-]+/\1[REDACTED]/g')"
+
+          echo "Claude terminal result: ${diagnostic}"
+          {
+            echo "### Claude API rejection"
+            echo
+            echo "The reviewer failed before model inference. Only its terminal API"
+            echo "error is shown below; the model transcript remains hidden and"
+            echo "credential-shaped text is redacted."
+            echo
+            printf '> %s\n' "$diagnostic"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # A conclusion of `success` says the action finished, NOT that a review
       # reached the pull request. Whether agent-mode Claude is handed tools that
