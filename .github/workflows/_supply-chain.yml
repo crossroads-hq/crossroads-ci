@@ -50,11 +50,25 @@ on:
           gives an input no list type.
 
           Defaults to GitHub-hosted, so every existing caller is unchanged.
-          Worth pointing at the fleet from a PRIVATE caller: these jobs are
-          seconds long but Actions bills each JOB rounded up to a whole
-          minute, so two ~15-second jobs cost two minutes on every run.
+          Worth moving for cost: these jobs are seconds long, but Actions
+          bills each JOB rounded up to a whole minute, so two ~15-second
+          jobs cost two minutes on every run of every private caller.
 
-          Two requirements on the target, neither checked here:
+          ONLY point this at self-hosted infrastructure from a repository
+          that does not accept fork pull requests. Unlike _ai-review.yml,
+          which gates its job on `head.repo.full_name == github.repository`,
+          none of these three has a same-repo guard -- `gitleaks` has no
+          `if:` at all -- so a fork PR schedules work on whatever runner
+          this input names: a full-history checkout, a binary download, and
+          a container-based scanner, all over a branch a stranger wrote. On
+          a GitHub-hosted runner that is a throwaway VM; on a persistent
+          self-hosted one it is the exposure GitHub's own documentation
+          warns about. The guard is deliberately NOT added here -- it would
+          stop fork PRs being scanned at all, and scanning them is the
+          point -- which is exactly why the constraint lands on this input
+          instead.
+
+          Two further requirements on the target, neither checked here:
           Linux (the gitleaks step fetches a `linux_x64` tarball and shells
           out to `sha256sum`), and a working Docker daemon when `osv-scan`
           is on, because osv-scanner-action is a container action. A runner
