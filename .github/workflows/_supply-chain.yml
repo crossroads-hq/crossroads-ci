@@ -42,6 +42,27 @@ on:
         type: boolean
         required: false
         default: true
+      runner-labels:
+        description: >-
+          JSON array of `runs-on` labels for all three jobs, e.g.
+          `["self-hosted","fast"]`. A JSON string rather than a plain label
+          because `runs-on` needs a LIST for a self-hosted target and Actions
+          gives an input no list type.
+
+          Defaults to GitHub-hosted, so every existing caller is unchanged.
+          Worth pointing at the fleet from a PRIVATE caller: these jobs are
+          seconds long but Actions bills each JOB rounded up to a whole
+          minute, so two ~15-second jobs cost two minutes on every run.
+
+          Two requirements on the target, neither checked here:
+          Linux (the gitleaks step fetches a `linux_x64` tarball and shells
+          out to `sha256sum`), and a working Docker daemon when `osv-scan`
+          is on, because osv-scanner-action is a container action. A runner
+          missing Docker fails the lockfile job rather than skipping it --
+          verify before moving a caller that sets `osv-scan: true`.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
       working-directory:
         description: Directory holding package.json, for npm-audit.
         type: string
@@ -55,7 +76,7 @@ jobs:
   dependency-review:
     name: Dependency review
     if: inputs.dependency-review && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -71,7 +92,7 @@ jobs:
   lockfile-checks:
     name: Lockfile checks
     if: inputs.osv-scan || inputs.npm-audit
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -101,7 +122,7 @@ jobs:
     # range, and the direct scan reads only the checkout.
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: 10
     steps:
       - name: Checkout

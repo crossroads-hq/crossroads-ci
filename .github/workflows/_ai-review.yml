@@ -81,6 +81,29 @@ on:
         # PR #20 measured a Codex review arriving about 190 seconds after the
         # wait began, just beyond the former 180-second default.
         default: 300
+      runner-labels:
+        description: >-
+          JSON array of `runs-on` labels for the review job, e.g.
+          `["self-hosted","fast"]`. A JSON string rather than a plain label
+          because `runs-on` needs a LIST for a self-hosted target and Actions
+          gives an input no list type; `fromJSON` on a string is the only
+          form that expresses both. Matches the caller-side convention in
+          crossroads-ui's runner-diagnostics workflow.
+
+          Defaults to GitHub-hosted, so every existing caller is unchanged.
+          Point it at the fleet from a PRIVATE caller, where hosted minutes
+          are billed to the CALLER and not to this repository: reusable
+          workflows spend the calling repository's allowance regardless of
+          where they are defined, which is what made this job the largest
+          single line on the crossroads-hq bill.
+
+          Safe on a public caller only because the job's `if:` requires
+          `head.repo.full_name == github.repository` -- a fork PR never
+          reaches a runner. Do not weaken that guard and this input
+          together.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
       job-timeout-minutes:
         description: >-
           Ceiling for the whole job. Exposed as an input only so the pre-flight
@@ -154,7 +177,7 @@ jobs:
       # The action exchanges the workflow's OIDC token for a Claude App token
       # so comments are attributed to claude[bot]. Safe under the fork guard.
       id-token: write
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
     # Read by the budget guard below through the same input, so the two cannot
     # disagree.
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
