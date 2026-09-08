@@ -6,9 +6,12 @@ description: >-
   never report. Needs no checkout -- the file list comes from the API.
 
   The filter treats `docs/` and Markdown as non-reviewable, EXCEPT anything
-  under `.github/` or `.claude/` -- those trees hold the review guidelines,
-  the workflow definitions and the skills contracts, i.e. the rules the
-  reviewer enforces. The previous per-repo copies of this filter exempted the
+  under `.github/`, `.claude/` or `.agents/` -- those trees hold the review
+  guidelines, the workflow definitions and the skills contracts, i.e. the rules
+  the reviewer enforces. `.agents/` is the Codex-facing half of that contract
+  set and carries the same skills as `.claude/`; because its files all end
+  `.md`, omitting it meant pass 2 discarded them and a PR editing only those
+  contracts skipped review entirely. The previous per-repo copies of this filter exempted the
   review contract from review; a PR rewriting the reviewer's rules was, by the
   filter's own logic, not reviewable.
 
@@ -38,10 +41,11 @@ runs:
         # Two passes, capture-and-test rather than grep exit status: `grep -v`
         # semantics under `set -e` differ subtly across shells, and `|| true`
         # keeps a no-match from aborting the step.
-        # Pass 1: anything under .github/ or .claude/ is always reviewable.
-        contract_files="$(printf '%s\n' "$files" | grep -E '^\.(github|claude)/' || true)"
+        # Pass 1: anything under .github/, .claude/ or .agents/ is always
+        # reviewable. Keep this alternation and pass 2's identical.
+        contract_files="$(printf '%s\n' "$files" | grep -E '^\.(github|claude|agents)/' || true)"
         # Pass 2: outside those trees, docs/ and Markdown are not reviewable.
-        code_files="$(printf '%s\n' "$files" | grep -vE '^\.(github|claude)/' | grep -vE '^docs/|\.md$' || true)"
+        code_files="$(printf '%s\n' "$files" | grep -vE '^\.(github|claude|agents)/' | grep -vE '^docs/|\.md$' || true)"
         if [ -n "$contract_files" ] || [ -n "$code_files" ]; then
           count="$(printf '%s\n%s\n' "$contract_files" "$code_files" | grep -c . || true)"
           echo "Reviewing ${count} file(s)." >> "$GITHUB_STEP_SUMMARY"
