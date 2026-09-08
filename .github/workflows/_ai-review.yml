@@ -767,6 +767,17 @@ jobs:
           # run), and any incapacity of the action itself, which posted
           # normally on crossroads-ci#35.
           #
+          # Tracked as crossroads-ci#59, which carries the measured rate -- 0
+          # of the last 20 PR Validation runs on crossroads-ui, against one
+          # observed occurrence -- and the reason it stays unfixed: delivery
+          # depends on the model CHOOSING to call `gh pr comment`, so it is
+          # rare, does not reproduce, and survives prompt wording. That issue
+          # also holds the one measurement that would settle it, which is why
+          # this flag exists: with the reviewer's output captured, whether the
+          # terminal `result` carries a full review body or is empty separates
+          # a delivery failure from a reviewer that produced nothing, and the
+          # two need opposite fixes.
+          #
           # Hardcoding it true again would drop redaction for every review in
           # every consumer at once, and the Actions log is org-visible. As an
           # input it can be switched on for the ONE repository being
