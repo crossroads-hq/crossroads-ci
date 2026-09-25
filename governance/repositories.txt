@@ -36,6 +36,13 @@ crossroads-hq/storybook-live-code-addon     full+tags  main
 crossroads-hq/crossroads-ui                 full       main
 crossroads-hq/crossroads-evolution          full       main
 
+# Tier B — private applications, internal
+# Crossroads HQ, the internal management screen (second repository of the
+# Crossroads Studio program). Gate workflow landed on main 2026-09-26 before
+# the profile was set; no code yet, sanity plus the control plane's
+# workflow-lint and supply-chain legs.
+crossroads-hq/hq                            full       main
+
 # Tier C — docs / contract repositories
 crossroads-hq/crossroads-agent-system       full       main
 # Vault sanity gate (conflict markers + JSON validity) added 2026-08-23 once
