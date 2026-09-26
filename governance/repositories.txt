@@ -65,6 +65,15 @@ crossroads-hq/crossroads-os                 full       main
 crossroads-hq/git-guards                    minimal    main
 crossroads-hq/skills                        minimal    main
 
+# Tier D — Crossroads Studio program repositories, no CI yet. Both sat at
+# fleet-profile=none (the property's default), so no org ruleset reached
+# them and audit-fleet-drift.sh flagged each as MUST FIX. Neither has a
+# .github/workflows directory, so `minimal` rather than `full`. Property set
+# and entries added 2026-09-26. crossroads-platform is paused
+# (ARCH-PLATFORM-001); crossroads-studio is the authoring surface.
+crossroads-hq/crossroads-studio             minimal    main
+crossroads-hq/crossroads-platform           minimal    main
+
 # Tier D previously held four entries, all of them wrong: this file named four
 # repositories crossroads-hq has never held, and nothing caught it because the
 # per-repository scripts key on gh's exit status, where a 404 for a name that
