@@ -50,8 +50,9 @@ crossroads-hq/crossroads-agent-system       full       main
 # full profile applies. NOTE: full ends direct pushes to the vault branch —
 # every Obsidian sync now lands via a pull request. If that turns out to be
 # unlivable, flip this back to `minimal` and re-run apply-fleet; the gate
-# workflow keeps running either way. Non-standard default branch.
-crossroads-hq/crossroads-os                 full       crossroads-os-v2
+# workflow keeps running either way. Default branch moved from
+# crossroads-os-v2 to main 2026-09-26, matching the rest of the fleet.
+crossroads-hq/crossroads-os                 full       main
 
 # Tier D — live but CI-less. `minimal` until archived or promoted.
 # Neither has a .github/workflows directory, which is precisely what `minimal`
