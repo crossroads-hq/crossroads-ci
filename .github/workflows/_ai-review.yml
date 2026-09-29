@@ -864,7 +864,10 @@ jobs:
       # and provider failure indistinguishable.
       #
       # Read only the terminal result from the action's execution file, and
-      # only for the pre-inference API-error shape. Never print assistant or
+      # only for the pre-inference shape: zero cost and empty model usage, so
+      # no model ran and the result cannot carry a review transcript. The
+      # text is NOT required to start with "API Error:" -- crossroads-ci#67
+      # hit this shape with some other wording and the step printed nothing. Never print assistant or
       # tool messages. Credential-shaped strings are masked, control characters
       # are flattened, and the diagnostic is capped before it reaches the
       # org-visible log. Full transcript output remains off by default.
@@ -892,12 +895,13 @@ jobs:
                   .subtype == "success" and
                   .is_error == true and
                   (.total_cost_usd // 0) == 0 and
-                  ((.modelUsage // {}) | length) == 0 and
-                  ((.result // "") | startswith("API Error:"))
+                  ((.modelUsage // {}) | length) == 0
                 )
             ]
             | last
-            | (.result // empty)
+            | select(. != null)
+            | (.result // "")
+            | if . == "" then "(the reviewer returned no result text)" else . end
             | gsub("[\u0000-\u001f\u007f]"; " ")
             | .[0:500]
           ' "$EXECUTION_FILE" 2>/dev/null)"; then
