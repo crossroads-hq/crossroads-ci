@@ -104,11 +104,25 @@ function isCodexBot(user) {
   );
 }
 
-function reviewedCommit(body) {
-  if (typeof body !== "string") return "";
-  return body.match(
+const SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->";
+
+// Every commit a Codex comment vouches for, with the reason to report. Two
+// formats: the older one-line clean verdict, and the summary table Codex
+// edits in place (first seen on crossroads-ci#67, 2026-09-29), where a
+// "Code Review" row marked Completed means Codex finished reviewing that
+// commit. Findings still arrive as a formal review, caught before this.
+function reviewedCommits(body) {
+  if (typeof body !== "string") return [];
+  const clean = body.match(
     /^Codex Review: Didn't find any major issues\.[^\r\n]*\r?\n\r?\n\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`(?:\r?\n|$)/
-  )?.[1] || "";
+  )?.[1];
+  if (clean) return [{ sha: clean, reason: "codex-clean-comment-found" }];
+  if (!body.startsWith(SUMMARY_MARKER)) return [];
+  return [
+    ...body.matchAll(
+      /^\| [^|\r\n]*\*\*Code Review\*\* \| ✅ \*\*Completed\*\*[^|\r\n]*\| `([0-9a-f]{7,40})` \|/gm
+    ),
+  ].map((m) => ({ sha: m[1], reason: "codex-summary-completed" }));
 }
 
 for (const name of ["REPO", "PR", "HEAD_SHA", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]) {
@@ -164,26 +178,31 @@ while (true) {
   }
 
   let cleanComment;
+  let cleanReason = "";
   let resolutionError = "";
   const headSha = process.env.HEAD_SHA.toLowerCase();
-  for (const comment of commentsResult.comments) {
+  search: for (const comment of commentsResult.comments) {
     if (!isCodexBot(comment?.user)) continue;
-    const abbreviatedSha = reviewedCommit(comment?.body).toLowerCase();
-    if (!abbreviatedSha || !headSha.startsWith(abbreviatedSha)) continue;
+    for (const { sha, reason } of reviewedCommits(comment?.body)) {
+      const abbreviatedSha = sha.toLowerCase();
+      if (!headSha.startsWith(abbreviatedSha)) continue;
 
-    if (abbreviatedSha.length === 40) {
-      cleanComment = comment;
-      break;
-    }
+      if (abbreviatedSha.length === 40) {
+        cleanComment = comment;
+        cleanReason = reason;
+        break search;
+      }
 
-    const resolved = resolveCommit(abbreviatedSha);
-    if (resolved.error) {
-      resolutionError = resolved.error;
-      continue;
-    }
-    if (resolved.sha.toLowerCase() === headSha) {
-      cleanComment = comment;
-      break;
+      const resolved = resolveCommit(abbreviatedSha);
+      if (resolved.error) {
+        resolutionError = resolved.error;
+        continue;
+      }
+      if (resolved.sha.toLowerCase() === headSha) {
+        cleanComment = comment;
+        cleanReason = reason;
+        break search;
+      }
     }
   }
 
@@ -201,9 +220,9 @@ while (true) {
   if (cleanComment) {
     finish(
       true,
-      "codex-clean-comment-found",
+      cleanReason,
       "",
-      `Verified Codex clean-review comment #${cleanComment.id} for head ${process.env.HEAD_SHA}; Claude fallback is not needed.`
+      `Verified Codex ${cleanReason === "codex-summary-completed" ? "completed-review summary" : "clean-review"} comment #${cleanComment.id} for head ${process.env.HEAD_SHA}; Claude fallback is not needed.`
     );
     break;
   }

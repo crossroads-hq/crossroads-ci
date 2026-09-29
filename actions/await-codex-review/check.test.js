@@ -438,3 +438,100 @@ test("caps the wait so the Claude fallback retains its runtime budget", () => {
   assert.equal(result.code, 1);
   assert.match(result.stderr, /WAIT_SECONDS must not exceed 600/);
 });
+
+function summaryComment(rows, overrides = {}) {
+  return {
+    id: 29,
+    user: { id: CODEX_USER_ID, login: CODEX_LOGIN, type: "Bot" },
+    body:
+      "<!-- codex-pull-request-review-summary -->\n\n## Codex Review Summary\n\n" +
+      "This comment shows the latest Codex review activity on this pull request.\n\n" +
+      "| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n" +
+      rows.join("\n") +
+      "\n\n<details> <summary>About Codex in GitHub</summary>\n</details>",
+    created_at: "2026-09-29T19:21:18Z",
+    updated_at: "2026-09-29T19:23:42Z",
+    ...overrides,
+  };
+}
+
+const COMPLETED_ROW =
+  '| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="2026-09-29T19:23:41.708714Z">2026-09-29T19:23:41.708714Z</relative-time> | `0123456789` | PR opened |';
+
+test("accepts a completed code review in the Codex summary comment for the current head", () => {
+  // The format Codex posted on crossroads-ci#67 (2026-09-29): no formal
+  // review and no clean-verdict comment, only this edited summary table.
+  const result = run({ comments: [[[summaryComment([COMPLETED_ROW])]]] });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.output, {
+    reviewed: "true",
+    reason: "codex-summary-completed",
+    "review-id": "",
+  });
+});
+
+test("does not accept a summary row that is still running", () => {
+  const running = COMPLETED_ROW.replace(
+    /✅ \*\*Completed\*\*/,
+    "🔄 **Running** since"
+  );
+  const result = run({ comments: [[[summaryComment([running])]]] });
+
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+test("does not accept a completed summary row for an older head", () => {
+  const result = run({
+    comments: [[[summaryComment([COMPLETED_ROW.replace("0123456789", "fedcba9876")])]]],
+    commits: { fedcba9876: { sha: "fedcba9876543210fedcba9876543210fedcba98" } },
+  });
+
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+test("does not accept a completed row that is not a code review", () => {
+  const result = run({
+    comments: [[[summaryComment([COMPLETED_ROW.replace("**Code Review**", "**Security Review**")])]]],
+  });
+
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a summary comment from a spoofed author", () => {
+  const result = run({
+    comments: [[[
+      summaryComment([COMPLETED_ROW], {
+        user: { id: 1, login: CODEX_LOGIN, type: "Bot" },
+      }),
+    ]]],
+  });
+
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a completed row outside the Codex summary marker", () => {
+  const body = summaryComment([COMPLETED_ROW]).body.replace(
+    "<!-- codex-pull-request-review-summary -->",
+    "Quoting an old summary:"
+  );
+  const result = run({ comments: [[[summaryComment([COMPLETED_ROW], { body })]]] });
+
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("accepts the current head among several summary rows", () => {
+  const older = COMPLETED_ROW.replace("0123456789", "fedcba9876");
+  const result = run({
+    comments: [[[summaryComment([older, COMPLETED_ROW])]]],
+    commits: {
+      "0123456789": { sha: HEAD_SHA },
+      fedcba9876: { sha: "fedcba9876543210fedcba9876543210fedcba98" },
+    },
+  });
+
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-summary-completed");
+});
