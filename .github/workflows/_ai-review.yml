@@ -750,7 +750,7 @@ jobs:
         # rather than seconds; re-measure before raising this default or the
         # Codex wait.
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
-        uses: anthropics/claude-code-action@fa2b2666b747000bf42767d1f332065b375e3c8f # v1.0.214
+        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6 # v1.0.234
         with:
           claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
           # Off unless a consumer asks for it. 74b8b5c hardcoded this true to
