@@ -535,3 +535,25 @@ test("accepts the current head among several summary rows", () => {
   assert.equal(result.output.reviewed, "true");
   assert.equal(result.output.reason, "codex-summary-completed");
 });
+
+test("does not let a completed summary revive a dismissed current-head review", () => {
+  // Codex review on crossroads-ci#68: a dismissed review with findings leaves
+  // the independently edited summary row saying Completed.
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW])]]],
+  });
+
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+test("a dismissed review for an older head does not block the current-head summary", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED", commit_id: "fedcba9876543210fedcba9876543210fedcba98" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW])]]],
+  });
+
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-summary-completed");
+});

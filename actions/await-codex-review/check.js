@@ -181,9 +181,20 @@ while (true) {
   let cleanReason = "";
   let resolutionError = "";
   const headSha = process.env.HEAD_SHA.toLowerCase();
+  // The summary row is edited independently of the reviews. When a
+  // current-head Codex review with findings is dismissed, the row can still
+  // read Completed; accepting it would revive the review the loop above
+  // deliberately rejected.
+  const dismissedAtHead = result.reviews.some(
+    (review) =>
+      isCodexBot(review?.user) &&
+      review?.commit_id?.toLowerCase() === headSha &&
+      review?.state === "DISMISSED"
+  );
   search: for (const comment of commentsResult.comments) {
     if (!isCodexBot(comment?.user)) continue;
     for (const { sha, reason } of reviewedCommits(comment?.body)) {
+      if (reason === "codex-summary-completed" && dismissedAtHead) continue;
       const abbreviatedSha = sha.toLowerCase();
       if (!headSha.startsWith(abbreviatedSha)) continue;
 
