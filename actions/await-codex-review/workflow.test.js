@@ -98,3 +98,30 @@ test("a pre-inference API rejection is reported without exposing the transcript 
   assert.doesNotMatch(output, /TRANSCRIPT MUST STAY HIDDEN/);
   assert.doesNotMatch(output, /sk-ant-api01-secretvalue/);
 });
+
+function stepBlock(name) {
+  const marker = `      - name: ${name}\n`;
+  const start = workflow.indexOf(marker);
+  assert.notStrictEqual(start, -1, `workflow step '${name}' is missing`);
+  const next = workflow.indexOf("\n      - name: ", start + marker.length);
+  return workflow.slice(start, next === -1 ? undefined : next);
+}
+
+test("the API rejection step runs after the review fails, not only after it succeeds", () => {
+  // An `if:` with no status function is implicitly `success() && ...`, so a
+  // step gated only on a failed predecessor can never run (crossroads-ci#66).
+  const ifLine = stepBlock("Expose sanitized Claude API rejection").match(/^\s+if: (.*)$/m);
+  assert.ok(ifLine, "the step must carry an if:");
+  assert.match(ifLine[1], /\bfailure\(\)|\balways\(\)|!cancelled\(\)/);
+  assert.match(ifLine[1], /steps\.review\.outcome == 'failure'/);
+});
+
+test("inline comments post live instead of through the action's shared /tmp buffer", () => {
+  // The action buffers to a fixed /tmp path that outlives the job on
+  // persistent runners and is never deleted; without an Anthropic API key it
+  // then posts every stale entry to whatever PR runs next (crossroads-ci#66).
+  assert.match(
+    stepBlock("Claude review"),
+    /^\s+classify_inline_comments: 'false'\s*$/m
+  );
+});
