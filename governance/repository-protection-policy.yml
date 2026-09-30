@@ -60,9 +60,11 @@ decisions:
   - id: merge-methods
     rule: allowed_merge_methods stays [merge, squash, rebase]
     reason: >-
-      Matches live fleet behaviour. Narrowing to squash-only was proposed in
-      the CI roadmap and is deliberately not bundled into the control-plane
-      migration; adopt it, if at all, as its own reviewed change.
+      Matches live fleet behaviour. Narrowing to squash-only was proposed
+      while the control plane was being planned (August 2026; that plan was
+      never committed to a repository) and is deliberately not bundled into
+      the control-plane migration; adopt it, if at all, as its own reviewed
+      change.
     owner: tsviser
     review_by: "2026-11-23"
   - id: dismiss-stale-reviews
