@@ -2,9 +2,11 @@
 
 Guidance for coding agents working in crossroads-ci, the control plane for the
 Crossroads fleet: shared workflows, composite actions, and repository
-governance. Codex reads the review rules below when it reviews pull requests.
-The Claude fallback reviewer in `.github/workflows/_ai-review.yml` does not read
-this file; keep the two in step if either changes.
+governance. Both AI reviewers apply the review rules below: Codex reads them
+from this file directly, and the Claude fallback receives this file as its
+review contract (`guidelines-file: AGENTS.md` in `.github/workflows/ci.yml`),
+read from the base branch so a pull request cannot change the rules it is
+reviewed under.
 
 ## Code Review Rules
 

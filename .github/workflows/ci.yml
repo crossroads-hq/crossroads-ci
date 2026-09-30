@@ -156,6 +156,12 @@ jobs:
   ai-review:
     name: AI review
     uses: ./.github/workflows/_ai-review.yml
+    # One rulebook for both reviewers. Codex reads the "Code Review Rules"
+    # section of AGENTS.md on its own; this points the Claude fallback at the
+    # same file, which _ai-review.yml reads from the BASE ref, so a pull
+    # request cannot rewrite the rules it is reviewed under.
+    with:
+      guidelines-file: AGENTS.md
     # A called workflow's jobs may not exceed the caller's grant (same rule
     # as supply-chain above); id-token is never inherited, so omitting this
     # block fails the run at startup.
