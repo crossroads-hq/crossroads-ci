@@ -171,6 +171,7 @@ jobs:
       actions: read         # head-SHA dedup reads /actions/runs and its jobs
       id-token: write
     secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   gate:
