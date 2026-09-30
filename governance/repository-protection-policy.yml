@@ -44,6 +44,21 @@ rules:
   allow_force_pushes: false
   allow_branch_deletion: false
 
+# Repository settings, not ruleset rules, so no ruleset can carry them. They
+# apply to profiles full and full+tags, and scripts/audit-fleet-drift.sh
+# ("Merge settings") fails on any gate-enabled repository that drifts. Set
+# 2026-09-30, when auto-merge was on in four of eight such repositories and the
+# update-branch suggestion in one.
+repository_settings:
+  applies_to: [full, full+tags]
+  # Lets `gh pr merge --auto` and the desktop app's Auto-merge queue a PR to
+  # merge once PR Validation passes. The ruleset still gates every merge.
+  allow_auto_merge: true
+  # require_status_checks.strict forces a branch to be current with main;
+  # this offers the one-click update instead of a manual merge.
+  allow_update_branch: true
+  delete_branch_on_merge: true
+
 exceptions:
   process: written decision record naming repository, rule, reason, owner, and expiry
   default_expiry: 90 days
