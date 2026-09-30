@@ -220,6 +220,24 @@ for r in "${repos[@]}"; do
   [ -n "${local_rs:-}" ] && fail "\`$r\` carries repo-level ruleset(s): ${local_rs}. Rulesets are additive and the stricter rule wins, so this silently overrides the org."
 done
 
+# ---------------------------- 2b. merge settings on gate-enabled repositories
+# Repository settings rather than ruleset rules, so section 2 cannot see them.
+# governance/repository-protection-policy.yml, repository_settings, records the
+# values and why. Checked only where a gate exists (full, full+tags): minimal
+# repositories carry no required check for auto-merge to wait on.
+say ""
+say "### Merge settings"
+for r in "${repos[@]}"; do
+  case "$(roster_profile "$r")" in full|full+tags) ;; *) continue ;; esac
+  meta="$(try "repos/$ORG/$r")" || { info "\`$r\` metadata unreadable — merge settings NOT checked."; continue; }
+  for setting in allow_auto_merge allow_update_branch delete_branch_on_merge; do
+    # Not `.[$s] // "unset"`: jq's `//` treats false as absent, so it would
+    # report a setting that is plainly off as missing.
+    value="$(jq -r --arg s "$setting" 'if has($s) then .[$s] | tostring else "unset" end' <<<"$meta")"
+    [ "$value" = "true" ] || fail "\`$r\` has \`$setting=$value\`; the policy's repository_settings require \`true\` on gate-enabled repositories."
+  done
+done
+
 # --------------------------------------------- 3. repo secrets shadow org ones
 say ""
 say "### Secrets"
