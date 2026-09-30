@@ -328,7 +328,7 @@ jobs:
         # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
         # cross-repo, a relative path resolves against the CALLER's checkout,
         # which at this point in the job does not exist.
-        uses: crossroads-hq/crossroads-ci/actions/detect-reviewable@4ef8a6f07309d5e81cd07938223d39591076b384 # guidance-file detection (PR #71)
+        uses: crossroads-hq/crossroads-ci/actions/detect-reviewable@36410e8c5f83a0f3b172191852223c0ec7bc3956 # main after #68 and #71
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -494,7 +494,7 @@ jobs:
       - name: Wait for Codex review
         id: codex
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
-        uses: crossroads-hq/crossroads-ci/actions/await-codex-review@c863c4b2c0e3614b50986277a22b962bc98402ee # await-codex-review v1
+        uses: crossroads-hq/crossroads-ci/actions/await-codex-review@36410e8c5f83a0f3b172191852223c0ec7bc3956 # main after #68 and #71
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-seconds: ${{ inputs.codex-wait-seconds }}
