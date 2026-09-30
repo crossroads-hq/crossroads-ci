@@ -250,7 +250,7 @@ while (true) {
         // Events have second precision. A completion in that same second
         // cannot establish ordering, so it must also take the safer path.
         if (!Number.isFinite(completedAt) || completedAt < boundary.latest + 1000 ||
-            !(timestamp(comment.updated_at) >= completedAt)) continue;
+            !(timestamp(comment.updated_at) + 1000 > completedAt)) continue;
       }
 
       if (abbreviatedSha.length === 40) {

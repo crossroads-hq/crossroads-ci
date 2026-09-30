@@ -580,6 +580,15 @@ test("accepts a newer completed summary after a current-head review was dismisse
   assert.equal(result.output.reason, "codex-summary-completed");
 });
 
+test("accepts a completion within the summary edit's second-precision timestamp", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW], { updated_at: "2026-09-29T19:23:41Z" })]]],
+    events: [[[dismissal("2026-09-29T19:22:00Z")]]],
+  });
+  assert.equal(result.output.reviewed, "true");
+});
+
 test("correlates every current-head dismissal across event pages", () => {
   const result = run({
     reviews: [[[review({ state: "DISMISSED" }), review({ id: 18, state: "DISMISSED" })]]],
