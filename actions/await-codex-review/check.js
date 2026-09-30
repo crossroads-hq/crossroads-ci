@@ -96,6 +96,45 @@ function resolveCommit(abbreviatedSha) {
   }
 }
 
+function timestamp(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)) return NaN;
+  return Date.parse(value);
+}
+
+function dismissalBoundary(reviews) {
+  const proc = spawnSync("gh", [
+    "api", `repos/${process.env.REPO}/issues/${process.env.PR}/events`,
+    "--paginate", "--slurp",
+  ], { encoding: "utf8", env: process.env });
+  if (proc.status !== 0) return { error: proc.stderr.trim() || `gh exited ${proc.status}` };
+  try {
+    const pages = JSON.parse(proc.stdout);
+    if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+      return { error: "GitHub events response was not an array of pages." };
+    }
+    const events = pages.flat();
+    let latest = 0;
+    for (const review of reviews) {
+      if (!Number.isSafeInteger(review.id) || review.id <= 0) {
+        return { error: "Dismissed review did not contain a valid review id." };
+      }
+      const matches = events.filter((event) =>
+        event?.event === "review_dismissed" &&
+        String(event?.dismissed_review?.review_id) === String(review.id)
+      );
+      if (matches.length === 0) return { error: `No dismissal event for review ${review.id}.` };
+      for (const event of matches) {
+        const dismissedAt = timestamp(event.created_at);
+        if (!Number.isFinite(dismissedAt)) return { error: "Dismissal event has no valid timestamp." };
+        latest = Math.max(latest, dismissedAt);
+      }
+    }
+    return { latest };
+  } catch (error) {
+    return { error: `GitHub events response was not valid JSON: ${error.message}` };
+  }
+}
+
 function isCodexBot(user) {
   return (
     user?.id === CODEX_USER_ID &&
@@ -104,11 +143,28 @@ function isCodexBot(user) {
   );
 }
 
-function reviewedCommit(body) {
-  if (typeof body !== "string") return "";
-  return body.match(
+const SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->";
+
+// Every commit a Codex comment vouches for, with the reason to report. Two
+// formats: the older one-line clean verdict, and the summary table Codex
+// edits in place (first seen on crossroads-ci#67, 2026-09-29), where a
+// "Code Review" row marked Completed means Codex finished reviewing that
+// commit. Findings still arrive as a formal review, caught before this.
+function reviewedCommits(body) {
+  if (typeof body !== "string") return [];
+  const clean = body.match(
     /^Codex Review: Didn't find any major issues\.[^\r\n]*\r?\n\r?\n\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`(?:\r?\n|$)/
-  )?.[1] || "";
+  )?.[1];
+  if (clean) return [{ sha: clean, reason: "codex-clean-comment-found" }];
+  if (!body.startsWith(SUMMARY_MARKER)) return [];
+  return [
+    ...body.matchAll(
+      /^\| [^|\r\n]*\*\*Code Review\*\* \| ✅ \*\*Completed\*\*([^|\r\n]*)\| `([0-9a-f]{7,40})` \|/gm
+    ),
+  ].map((m) => ({
+    sha: m[2], reason: "codex-summary-completed",
+    completedAt: timestamp(m[1].match(/<relative-time datetime="([^"]+)"/)?.[1]),
+  }));
 }
 
 for (const name of ["REPO", "PR", "HEAD_SHA", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]) {
@@ -164,27 +220,63 @@ while (true) {
   }
 
   let cleanComment;
+  let cleanReason = "";
   let resolutionError = "";
   const headSha = process.env.HEAD_SHA.toLowerCase();
-  for (const comment of commentsResult.comments) {
+  // Reject the completed result that preceded a dismissal, but permit a
+  // later review of the same head. The row's completion time matters: a
+  // summary comment is edited independently, and its updated_at alone does
+  // not identify which review was completed. Unknown dismissal state falls
+  // back to Claude rather than accepting stale evidence.
+  const dismissedAtHead = result.reviews.filter(
+    (review) =>
+      isCodexBot(review?.user) &&
+      review?.commit_id?.toLowerCase() === headSha &&
+      review?.state === "DISMISSED"
+  );
+  let boundary;
+  let dismissalError = "";
+  search: for (const comment of commentsResult.comments) {
     if (!isCodexBot(comment?.user)) continue;
-    const abbreviatedSha = reviewedCommit(comment?.body).toLowerCase();
-    if (!abbreviatedSha || !headSha.startsWith(abbreviatedSha)) continue;
+    for (const { sha, reason, completedAt } of reviewedCommits(comment?.body)) {
+      const abbreviatedSha = sha.toLowerCase();
+      if (!headSha.startsWith(abbreviatedSha)) continue;
+      if (reason === "codex-summary-completed" && dismissedAtHead.length > 0) {
+        boundary ||= dismissalBoundary(dismissedAtHead);
+        if (boundary.error) {
+          dismissalError = boundary.error;
+          continue;
+        }
+        // Events have second precision. A completion in that same second
+        // cannot establish ordering, so it must also take the safer path.
+        if (!Number.isFinite(completedAt) || completedAt < boundary.latest + 1000 ||
+            !(timestamp(comment.updated_at) + 1000 > completedAt)) continue;
+      }
 
-    if (abbreviatedSha.length === 40) {
-      cleanComment = comment;
-      break;
-    }
+      if (abbreviatedSha.length === 40) {
+        cleanComment = comment;
+        cleanReason = reason;
+        break search;
+      }
 
-    const resolved = resolveCommit(abbreviatedSha);
-    if (resolved.error) {
-      resolutionError = resolved.error;
-      continue;
+      const resolved = resolveCommit(abbreviatedSha);
+      if (resolved.error) {
+        resolutionError = resolved.error;
+        continue;
+      }
+      if (resolved.sha.toLowerCase() === headSha) {
+        cleanComment = comment;
+        cleanReason = reason;
+        break search;
+      }
     }
-    if (resolved.sha.toLowerCase() === headSha) {
-      cleanComment = comment;
-      break;
-    }
+  }
+
+  if (!cleanComment && dismissalError) {
+    console.log(`::warning::Could not correlate dismissed Codex reviews: ${dismissalError}`);
+    finish(false, "codex-status-error", "",
+      "Could not establish current-head review dismissal times; falling back to Claude.");
+    break;
   }
 
   if (!cleanComment && resolutionError) {
@@ -201,9 +293,9 @@ while (true) {
   if (cleanComment) {
     finish(
       true,
-      "codex-clean-comment-found",
+      cleanReason,
       "",
-      `Verified Codex clean-review comment #${cleanComment.id} for head ${process.env.HEAD_SHA}; Claude fallback is not needed.`
+      `Verified Codex ${cleanReason === "codex-summary-completed" ? "completed-review summary" : "clean-review"} comment #${cleanComment.id} for head ${process.env.HEAD_SHA}; Claude fallback is not needed.`
     );
     break;
   }
