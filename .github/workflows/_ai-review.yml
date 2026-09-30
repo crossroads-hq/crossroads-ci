@@ -784,6 +784,18 @@ jobs:
           # diagnosed -- crossroads-ui, where delivery fails -- and left off
           # everywhere else.
           show_full_output: ${{ inputs.show-reviewer-output }}
+          # Post inline comments live; never through the action's buffer.
+          # Buffering appends to a FIXED /tmp/inline-comments-buffer.jsonl
+          # that the action never deletes, and the fleet runners are
+          # persistent, so the file outlives the job and is shared by every
+          # lane on the host. The post step then replays it after EVERY run --
+          # including one that made no model call -- and, lacking an
+          # anthropic_api_key to classify with, posts all of it. crossroads-ci#66
+          # measured four comments from another PR replayed onto crossroads-ui
+          # #480 and #489; they failed only because the paths did not resolve.
+          # With classification already impossible here, buffering bought
+          # nothing but that leak. Turning it off also skips the post step.
+          classify_inline_comments: 'false'
           # This is AGENT mode: `prompt:` is set and track_progress defaults to
           # false. In agent mode nothing is granted implicitly -- a prompt can
           # ask for twenty inline comments and the model will have no tool able
@@ -852,12 +864,20 @@ jobs:
       # and provider failure indistinguishable.
       #
       # Read only the terminal result from the action's execution file, and
-      # only for the pre-inference API-error shape. Never print assistant or
+      # only for the pre-inference shape: zero cost and empty model usage, so
+      # no model ran and the result cannot carry a review transcript. The
+      # text is NOT required to start with "API Error:" -- crossroads-ci#67
+      # hit this shape with some other wording and the step printed nothing. Never print assistant or
       # tool messages. Credential-shaped strings are masked, control characters
       # are flattened, and the diagnostic is capped before it reaches the
       # org-visible log. Full transcript output remains off by default.
+      #
+      # `failure()` is load-bearing. An `if:` with no status function is
+      # implicitly `success() && ...`, so gated on the outcome alone this step
+      # was skipped on exactly the runs it exists for -- crossroads-ci#66
+      # hid its pre-inference error across five crossroads-ui PRs that way.
       - name: Expose sanitized Claude API rejection
-        if: ${{ steps.review.outcome == 'failure' }}
+        if: ${{ failure() && steps.review.outcome == 'failure' }}
         env:
           EXECUTION_FILE: ${{ runner.temp }}/claude-execution-output.json
         run: |
@@ -875,12 +895,13 @@ jobs:
                   .subtype == "success" and
                   .is_error == true and
                   (.total_cost_usd // 0) == 0 and
-                  ((.modelUsage // {}) | length) == 0 and
-                  ((.result // "") | startswith("API Error:"))
+                  ((.modelUsage // {}) | length) == 0
                 )
             ]
             | last
-            | (.result // empty)
+            | select(. != null)
+            | (.result // "")
+            | if . == "" then "(the reviewer returned no result text)" else . end
             | gsub("[\u0000-\u001f\u007f]"; " ")
             | .[0:500]
           ' "$EXECUTION_FILE" 2>/dev/null)"; then
