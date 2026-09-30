@@ -39,7 +39,9 @@ jobs:
         # `--persona=regular` and non-zero only on findings at `high` and
         # above: the fleet's self-hosted-runner jobs trip zizmor's
         # lower-severity audits by design (documented in each workflow), and a
-        # linter that cries wolf gets removed. Tighten once the Phase 04
-        # runner hardening lands.
+        # linter that cries wolf gets removed. Tighten this once the
+        # self-hosted runners are hardened so those audits no longer fire by
+        # design. (The phased fleet CI plan that called this "Phase 04" was
+        # never committed; see README "Open decisions".)
         run: |
           pipx run zizmor==1.11.0 --min-severity=high .github/workflows/
