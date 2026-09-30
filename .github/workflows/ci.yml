@@ -46,6 +46,7 @@ jobs:
             workflow:
               - '.github/**'
             scripts:
+              - 'AGENTS.md'
               - 'scripts/**'
               - 'governance/**'
               - 'actions/**'

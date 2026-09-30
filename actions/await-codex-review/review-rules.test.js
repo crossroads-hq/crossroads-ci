@@ -17,3 +17,12 @@ test("the Claude fallback is pointed at the same rules as Codex", () => {
   const job = ci.slice(ci.indexOf("\n  ai-review:\n"), ci.indexOf("\n  gate:\n"));
   assert.match(job, /^    with:\n      guidelines-file: AGENTS\.md$/m);
 });
+
+test("an AGENTS-only change schedules the job that validates its review rules", () => {
+  const ci = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  const filter = ci.slice(ci.indexOf("            scripts:\n"), ci.indexOf("\n  workflow-lint:\n"));
+  assert.match(filter, /^              - 'AGENTS\.md'$/m);
+  const job = ci.slice(ci.indexOf("\n  scripts:\n"), ci.indexOf("\n  supply-chain:\n"));
+  assert.match(job, /needs\.changes\.outputs\.scripts == 'true'/);
+  assert.match(job, /run: node --test actions\/\*\/\*\.test\.js/);
+});
