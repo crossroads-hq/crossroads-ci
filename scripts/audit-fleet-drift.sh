@@ -229,7 +229,10 @@ say ""
 say "### Merge settings"
 for r in "${repos[@]}"; do
   case "$(roster_profile "$r")" in full|full+tags) ;; *) continue ;; esac
-  meta="$(try "repos/$ORG/$r")" || { info "\`$r\` metadata unreadable — merge settings NOT checked."; continue; }
+  # Unknown is not compliant: fail rather than inform, or an unreadable
+  # repository would leave the audit green with its settings never checked
+  # (AGENTS.md, "Unknown state is not absence").
+  meta="$(try "repos/$ORG/$r")" || { fail "\`$r\` metadata unreadable, so its merge settings could not be verified."; continue; }
   for setting in allow_auto_merge allow_update_branch delete_branch_on_merge; do
     # Not `.[$s] // "unset"`: jq's `//` treats false as absent, so it would
     # report a setting that is plainly off as missing.
