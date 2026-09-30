@@ -113,7 +113,11 @@ jobs:
     # detector; GitHub does not expose Codex quota state to this workflow.
     with:
       codex-wait-seconds: 300
+    # Pass at least one; the API key wins when both are set. Both are
+    # crossroads-hq org secrets delivered by Infisical (crossroads-fleet /
+    # prod / ci); the key is scoped to the Console's CI workspace.
     secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
       claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   gate:
