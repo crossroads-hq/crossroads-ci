@@ -168,7 +168,8 @@ workflows because Actions access is set to `user` scope
 ## Open decisions
 
 - `allowed_merge_methods` stays `["merge", "squash", "rebase"]`, matching live
-  fleet behaviour. Narrowing to squash-only was proposed in the CI roadmap and
+  fleet behaviour. Narrowing to squash-only was proposed while the control
+  plane was being planned (August 2026; that plan was never committed) and
   deliberately not bundled into the drift reconciliation; adopt it, if at all,
   as its own reviewed change.
 - `required_approving_review_count` stays 0: a solo owner cannot approve their

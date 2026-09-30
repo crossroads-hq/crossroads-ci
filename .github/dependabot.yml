@@ -1,6 +1,7 @@
-# Phase 02 of the fleet CI roadmap: Dependabot everywhere, replacing ad-hoc
-# update jobs. Grouped weekly so a quiet week produces one reviewable PR, not
-# ten.
+# Dependabot everywhere, replacing ad-hoc update jobs: it moves the deliberate
+# SHA pins forward without a human remembering to. (This was Phase 02 of the
+# August 2026 fleet CI plan, which was never committed to any repository.)
+# Grouped weekly so a quiet week produces one reviewable PR, not ten.
 version: 2
 updates:
   - package-ecosystem: github-actions
