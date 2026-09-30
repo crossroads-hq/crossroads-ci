@@ -50,12 +50,15 @@ function parseOutput(file) {
 function run({
   reviews = [[[]]],
   comments = [[[]]],
+  events = [[[]]],
   commits = { "0123456789": { sha: HEAD_SHA } },
   failReviews = false,
   failComments = false,
   failCommits = false,
+  failEvents = false,
   malformedComments = false,
   malformedCommits = false,
+  malformedEvents = false,
   wait = "0",
   poll = "30",
 } = {}) {
@@ -70,6 +73,7 @@ function run({
 const fs = require("node:fs");
 const reviews = JSON.parse(process.env.FAKE_GH_REVIEWS);
 const comments = JSON.parse(process.env.FAKE_GH_COMMENTS);
+const events = JSON.parse(process.env.FAKE_GH_EVENTS);
 const commits = JSON.parse(process.env.FAKE_GH_COMMITS);
 const state = process.env.FAKE_GH_STATE;
 const endpoint = process.argv[3] || "";
@@ -81,6 +85,9 @@ if (/\\/pulls\\/\\d+\\/reviews$/.test(endpoint)) {
 } else if (/\\/issues\\/\\d+\\/comments$/.test(endpoint)) {
   kind = "comments";
   responses = comments;
+} else if (/\\/issues\\/\\d+\\/events$/.test(endpoint)) {
+  kind = "events";
+  responses = events;
 } else if (/\\/commits\\/[0-9a-f]+$/.test(endpoint)) {
   kind = "commits";
 } else {
@@ -89,7 +96,7 @@ if (/\\/pulls\\/\\d+\\/reviews$/.test(endpoint)) {
 }
 const counts = fs.existsSync(state)
   ? JSON.parse(fs.readFileSync(state, "utf8"))
-  : { reviews: 0, comments: 0, commits: 0 };
+  : { reviews: 0, comments: 0, commits: 0, events: 0 };
 const count = counts[kind];
 counts[kind] += 1;
 fs.writeFileSync(state, JSON.stringify(counts));
@@ -131,17 +138,22 @@ process.stdout.write(JSON.stringify(response));
       GITHUB_STEP_SUMMARY: summary,
       FAKE_GH_REVIEWS: JSON.stringify(reviews),
       FAKE_GH_COMMENTS: JSON.stringify(comments),
+      FAKE_GH_EVENTS: JSON.stringify(events),
       FAKE_GH_COMMITS: JSON.stringify(commits),
       FAKE_GH_STATE: state,
       FAKE_GH_FAIL_KIND: failReviews
         ? "reviews"
         : failComments
           ? "comments"
+          : failEvents
+            ? "events"
           : failCommits
             ? "commits"
             : "",
       FAKE_GH_MALFORMED_KIND: malformedComments
         ? "comments"
+        : malformedEvents
+          ? "events"
         : malformedCommits
           ? "commits"
           : "",
@@ -437,4 +449,206 @@ test("caps the wait so the Claude fallback retains its runtime budget", () => {
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /WAIT_SECONDS must not exceed 600/);
+});
+
+function summaryComment(rows, overrides = {}) {
+  return {
+    id: 29,
+    user: { id: CODEX_USER_ID, login: CODEX_LOGIN, type: "Bot" },
+    body:
+      "<!-- codex-pull-request-review-summary -->\n\n## Codex Review Summary\n\n" +
+      "This comment shows the latest Codex review activity on this pull request.\n\n" +
+      "| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n" +
+      rows.join("\n") +
+      "\n\n<details> <summary>About Codex in GitHub</summary>\n</details>",
+    created_at: "2026-09-29T19:21:18Z",
+    updated_at: "2026-09-29T19:23:42Z",
+    ...overrides,
+  };
+}
+
+const COMPLETED_ROW =
+  '| 📝 **Code Review** | ✅ **Completed** <relative-time datetime="2026-09-29T19:23:41.708714Z">2026-09-29T19:23:41.708714Z</relative-time> | `0123456789` | PR opened |';
+
+test("accepts a completed code review in the Codex summary comment for the current head", () => {
+  // The format Codex posted on crossroads-ci#67 (2026-09-29): no formal
+  // review and no clean-verdict comment, only this edited summary table.
+  const result = run({ comments: [[[summaryComment([COMPLETED_ROW])]]] });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.output, {
+    reviewed: "true",
+    reason: "codex-summary-completed",
+    "review-id": "",
+  });
+});
+
+test("does not accept a summary row that is still running", () => {
+  const running = COMPLETED_ROW.replace(
+    /✅ \*\*Completed\*\*/,
+    "🔄 **Running** since"
+  );
+  const result = run({ comments: [[[summaryComment([running])]]] });
+
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+test("does not accept a completed summary row for an older head", () => {
+  const result = run({
+    comments: [[[summaryComment([COMPLETED_ROW.replace("0123456789", "fedcba9876")])]]],
+    commits: { fedcba9876: { sha: "fedcba9876543210fedcba9876543210fedcba98" } },
+  });
+
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+test("does not accept a completed row that is not a code review", () => {
+  const result = run({
+    comments: [[[summaryComment([COMPLETED_ROW.replace("**Code Review**", "**Security Review**")])]]],
+  });
+
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a summary comment from a spoofed author", () => {
+  const result = run({
+    comments: [[[
+      summaryComment([COMPLETED_ROW], {
+        user: { id: 1, login: CODEX_LOGIN, type: "Bot" },
+      }),
+    ]]],
+  });
+
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("does not accept a completed row outside the Codex summary marker", () => {
+  const body = summaryComment([COMPLETED_ROW]).body.replace(
+    "<!-- codex-pull-request-review-summary -->",
+    "Quoting an old summary:"
+  );
+  const result = run({ comments: [[[summaryComment([COMPLETED_ROW], { body })]]] });
+
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("accepts the current head among several summary rows", () => {
+  const older = COMPLETED_ROW.replace("0123456789", "fedcba9876");
+  const result = run({
+    comments: [[[summaryComment([older, COMPLETED_ROW])]]],
+    commits: {
+      "0123456789": { sha: HEAD_SHA },
+      fedcba9876: { sha: "fedcba9876543210fedcba9876543210fedcba98" },
+    },
+  });
+
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-summary-completed");
+});
+
+test("does not let a completed summary revive a dismissed current-head review", () => {
+  // Codex review on crossroads-ci#68: a dismissed review with findings leaves
+  // the independently edited summary row saying Completed.
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW])]]],
+    events: [[[dismissal("2026-09-29T19:24:00Z")]]],
+  });
+
+  assert.equal(result.output.reviewed, "false");
+  assert.equal(result.output.reason, "codex-review-timeout");
+});
+
+function dismissal(created_at, reviewId = 17) {
+  return {
+    id: 31,
+    event: "review_dismissed",
+    created_at,
+    dismissed_review: { review_id: reviewId, state: "commented" },
+  };
+}
+
+test("accepts a newer completed summary after a current-head review was dismissed", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW])]]],
+    events: [[[dismissal("2026-09-29T19:22:00Z")]]],
+  });
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-summary-completed");
+});
+
+test("accepts a completion within the summary edit's second-precision timestamp", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW], { updated_at: "2026-09-29T19:23:41Z" })]]],
+    events: [[[dismissal("2026-09-29T19:22:00Z")]]],
+  });
+  assert.equal(result.output.reviewed, "true");
+});
+
+test("correlates every current-head dismissal across event pages", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" }), review({ id: 18, state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW])]]],
+    events: [[
+      [dismissal("2026-09-29T19:22:00Z")],
+      [dismissal("2026-09-29T19:24:00Z", 18)],
+    ]],
+  });
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("fails closed when a dismissal cannot be dated or queried", () => {
+  for (const fixture of [
+    { events: [[[]]] },
+    { events: [[[dismissal("invalid")]]] },
+    { events: [[[dismissal("2026-09-29T19:22:00Z", 99)]]] },
+    { failEvents: true },
+    { malformedEvents: true },
+    { events: [[{}]] },
+  ]) {
+    const result = run({
+      reviews: [[[review({ state: "DISMISSED" })]]],
+      comments: [[[summaryComment([COMPLETED_ROW])]]],
+      ...fixture,
+    });
+    assert.equal(result.output.reviewed, "false");
+    assert.equal(result.output.reason, "codex-status-error");
+  }
+});
+
+test("does not use a summary edit time as evidence of a later review", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW], { updated_at: "2026-09-30T00:00:00Z" })]]],
+    events: [[[dismissal("2026-09-29T19:24:00Z")]]],
+  });
+  assert.equal(result.output.reviewed, "false");
+});
+
+test("rejects a missing completion timestamp and ambiguous same-second ordering", () => {
+  for (const row of [
+    COMPLETED_ROW.replace(/ <relative-time[^>]*>.*?<\/relative-time>/, ""),
+    COMPLETED_ROW,
+  ]) {
+    const result = run({
+      reviews: [[[review({ state: "DISMISSED" })]]],
+      comments: [[[summaryComment([row])]]],
+      events: [[[dismissal("2026-09-29T19:23:41Z")]]],
+    });
+    assert.equal(result.output.reviewed, "false");
+  }
+});
+
+test("a dismissed review for an older head does not block the current-head summary", () => {
+  const result = run({
+    reviews: [[[review({ state: "DISMISSED", commit_id: "fedcba9876543210fedcba9876543210fedcba98" })]]],
+    comments: [[[summaryComment([COMPLETED_ROW])]]],
+  });
+
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-summary-completed");
 });

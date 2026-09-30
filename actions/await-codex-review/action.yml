@@ -22,7 +22,7 @@ outputs:
     description: Machine-readable reason for the result.
     value: ${{ steps.check.outputs.reason }}
   review-id:
-    description: GitHub review id for a formal review; blank for a verified clean-review comment.
+    description: GitHub review id for a formal review; blank for a verified clean-review or completed-summary comment.
     value: ${{ steps.check.outputs.review-id }}
 
 runs:
