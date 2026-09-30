@@ -147,9 +147,22 @@ on:
         required: false
         default: false
     secrets:
+      # Pass at least one. The key wins when both are set: it is billed to the
+      # company Console org and does not share a person's subscription limits,
+      # and the OAuth token remains for a caller that has not moved over.
+      # Neither is required here because a Codex review can make the Claude
+      # fallback unnecessary; "Check a reviewer credential is present" fails
+      # the run by name when Claude is needed and neither arrived.
+      anthropic-api-key:
+        description: >-
+          The caller's ANTHROPIC_API_KEY, from the fleet's dedicated CI
+          workspace. Preferred.
+        required: false
       claude-code-oauth-token:
-        description: The caller's CLAUDE_CODE_OAUTH_TOKEN.
-        required: true
+        description: >-
+          The caller's CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`). Used
+          only when no API key is passed.
+        required: false
 
 permissions:
   contents: read
@@ -486,6 +499,20 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           wait-seconds: ${{ inputs.codex-wait-seconds }}
 
+      # Neither secret is required at the interface, so a caller that passes
+      # neither would otherwise reach the reviewer and die as an opaque auth
+      # failure. Only presence crosses into the shell, never a value.
+      - name: Check a reviewer credential is present
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
+        env:
+          ANTHROPIC_API_KEY_SET: ${{ secrets.anthropic-api-key && 'true' || '' }}
+          OAUTH_TOKEN_SET: ${{ secrets.claude-code-oauth-token && 'true' || '' }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY_SET" ] && [ -z "$OAUTH_TOKEN_SET" ]; then
+            echo "Claude is needed as the fallback reviewer, but the caller passed neither the anthropic-api-key nor the claude-code-oauth-token secret." >&2
+            exit 1
+          fi
+
       - name: Checkout
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -752,7 +779,11 @@ jobs:
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
         uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6 # v1.0.234
         with:
-          claude_code_oauth_token: ${{ secrets.claude-code-oauth-token }}
+          anthropic_api_key: ${{ secrets.anthropic-api-key }}
+          # Only when no key was passed. The action exports both to Claude
+          # Code, which would leave the choice to its precedence rules; this
+          # makes the key win by construction.
+          claude_code_oauth_token: ${{ !secrets.anthropic-api-key && secrets.claude-code-oauth-token || '' }}
           # Off unless a consumer asks for it. 74b8b5c hardcoded this true to
           # diagnose the instant is_error:true death and c0855ad removed it;
           # bumping the action to v1.0.214 in e041bef fixed that failure, and
