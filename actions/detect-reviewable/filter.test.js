@@ -125,3 +125,19 @@ test("both passes name the same trees", () => {
   assert.strictEqual(alternations[0], alternations[1], "pass 1 and pass 2 disagree");
   assert.ok(alternations[0].split("|").includes("agents"), "agents missing from the alternation");
 });
+
+test("agent guidance files are reviewable wherever they sit", () => {
+  // AGENTS.md carries the Code Review Rules both reviewers apply (Codex reads
+  // it directly; callers pass it as guidelines-file). A PR editing only that
+  // file was Markdown outside the contract trees, so it skipped review -- a
+  // PR rewriting the rules escaped the rules. Found by Codex on
+  // crossroads-ci#71. Codex also reads nested AGENTS.md files.
+  for (const file of ["AGENTS.md", "CLAUDE.md", "services/api/AGENTS.md"]) {
+    assert.strictEqual(detect([file]), true, `${file} must be reviewable`);
+  }
+});
+
+test("a guidance-shaped name is not enough", () => {
+  assert.strictEqual(detect(["docs/NOT_AGENTS.md"]), false);
+  assert.strictEqual(detect(["docs/agents.md"]), false);
+});

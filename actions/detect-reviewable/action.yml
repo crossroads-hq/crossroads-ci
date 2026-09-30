@@ -44,6 +44,12 @@ runs:
         # Pass 1: anything under .github/, .claude/ or .agents/ is always
         # reviewable. Keep this alternation and pass 2's identical.
         contract_files="$(printf '%s\n' "$files" | grep -E '^\.(github|claude|agents)/' || true)"
+        # Pass 1b: agent guidance files, at any depth. AGENTS.md holds the
+        # Code Review Rules both reviewers apply, so a PR that only rewrites
+        # them must still be reviewed under the base copy; as plain Markdown
+        # outside the trees above, pass 2 would drop it.
+        guidance_files="$(printf '%s\n' "$files" | grep -E '(^|/)(AGENTS|CLAUDE)\.md$' || true)"
+        contract_files="$(printf '%s\n%s\n' "$contract_files" "$guidance_files" | grep . | sort -u || true)"
         # Pass 2: outside those trees, docs/ and Markdown are not reviewable.
         code_files="$(printf '%s\n' "$files" | grep -vE '^\.(github|claude|agents)/' | grep -vE '^docs/|\.md$' || true)"
         if [ -n "$contract_files" ] || [ -n "$code_files" ]; then
