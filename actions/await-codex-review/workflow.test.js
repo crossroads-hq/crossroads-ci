@@ -50,7 +50,7 @@ test("the Claude fallback uses the lower-cost Sonnet model", () => {
 test("the workflow pins the detector with clean-comment support", () => {
   assert.match(
     workflow,
-    /uses: crossroads-hq\/crossroads-ci\/actions\/await-codex-review@c863c4b2c0e3614b50986277a22b962bc98402ee # await-codex-review v1/
+    /uses: crossroads-hq\/crossroads-ci\/actions\/await-codex-review@36410e8c5f83a0f3b172191852223c0ec7bc3956 # main after #68 and #71/
   );
 });
 
@@ -168,4 +168,14 @@ test("a pre-inference rejection is reported whatever its wording, since no model
 test("a pre-inference rejection with no result text says so instead of printing nothing", (t) => {
   assert.match(runRejectionStep(t, undefined), /no result text/i);
   assert.match(runRejectionStep(t, ""), /no result text/i);
+});
+
+test("the detector pin is a main commit that reviews guidance-only changes", () => {
+  // Pinned to a squash-merge commit ON main. The previous pin, 4ef8a6f, lived
+  // only on #71's deleted branch: reachable from no ref, so eligible for
+  // garbage collection, which would break every fleet review at once.
+  assert.match(
+    workflow,
+    /uses: crossroads-hq\/crossroads-ci\/actions\/detect-reviewable@36410e8c5f83a0f3b172191852223c0ec7bc3956 # main after #68 and #71/
+  );
 });
