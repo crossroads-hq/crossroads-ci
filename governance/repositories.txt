@@ -55,14 +55,16 @@ crossroads-hq/crossroads-agent-system       full       main
 crossroads-hq/crossroads-os                 full       main
 
 # Tier D — live but CI-less. `minimal` until archived or promoted.
-# Neither has a .github/workflows directory, which is precisely what `minimal`
-# is for. Both were ALREADY governed -- they carry fleet-profile=minimal and
-# the org ruleset protects them -- so what these two lines change is not their
-# protection but their reviewability: apply-fleet.sh, verify-fleet.sh and
-# verify-pins.sh all walk this file, and until now all three skipped them.
-# Being governed by the org and being absent from here is the quiet half of
-# the drift the other four entries were the loud half of. Added 2026-09-04.
-crossroads-hq/git-guards                    minimal    main
+# It has no .github/workflows directory, which is precisely what `minimal` is
+# for. It was ALREADY governed -- it carries fleet-profile=minimal and the org
+# ruleset protects it -- so what this line changes is not its protection but
+# its reviewability: apply-fleet.sh and verify-pins.sh walk this file and
+# skipped it until it was listed. Being governed by the org and being absent
+# from here is the quiet half of drift. Added 2026-09-04.
+#
+# git-guards was listed here too until 2026-10-01, when it moved to the
+# owner's personal account (tsviser/git-guards) by decision. It is outside
+# the org, so no org ruleset or fleet script governs it.
 crossroads-hq/skills                        minimal    main
 
 # Tier D — Crossroads Studio program repositories, no CI yet. Both sat at
