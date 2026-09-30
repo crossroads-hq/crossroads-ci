@@ -96,6 +96,45 @@ function resolveCommit(abbreviatedSha) {
   }
 }
 
+function timestamp(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)) return NaN;
+  return Date.parse(value);
+}
+
+function dismissalBoundary(reviews) {
+  const proc = spawnSync("gh", [
+    "api", `repos/${process.env.REPO}/issues/${process.env.PR}/events`,
+    "--paginate", "--slurp",
+  ], { encoding: "utf8", env: process.env });
+  if (proc.status !== 0) return { error: proc.stderr.trim() || `gh exited ${proc.status}` };
+  try {
+    const pages = JSON.parse(proc.stdout);
+    if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+      return { error: "GitHub events response was not an array of pages." };
+    }
+    const events = pages.flat();
+    let latest = 0;
+    for (const review of reviews) {
+      if (!Number.isSafeInteger(review.id) || review.id <= 0) {
+        return { error: "Dismissed review did not contain a valid review id." };
+      }
+      const matches = events.filter((event) =>
+        event?.event === "review_dismissed" &&
+        String(event?.dismissed_review?.review_id) === String(review.id)
+      );
+      if (matches.length === 0) return { error: `No dismissal event for review ${review.id}.` };
+      for (const event of matches) {
+        const dismissedAt = timestamp(event.created_at);
+        if (!Number.isFinite(dismissedAt)) return { error: "Dismissal event has no valid timestamp." };
+        latest = Math.max(latest, dismissedAt);
+      }
+    }
+    return { latest };
+  } catch (error) {
+    return { error: `GitHub events response was not valid JSON: ${error.message}` };
+  }
+}
+
 function isCodexBot(user) {
   return (
     user?.id === CODEX_USER_ID &&
@@ -120,9 +159,12 @@ function reviewedCommits(body) {
   if (!body.startsWith(SUMMARY_MARKER)) return [];
   return [
     ...body.matchAll(
-      /^\| [^|\r\n]*\*\*Code Review\*\* \| ✅ \*\*Completed\*\*[^|\r\n]*\| `([0-9a-f]{7,40})` \|/gm
+      /^\| [^|\r\n]*\*\*Code Review\*\* \| ✅ \*\*Completed\*\*([^|\r\n]*)\| `([0-9a-f]{7,40})` \|/gm
     ),
-  ].map((m) => ({ sha: m[1], reason: "codex-summary-completed" }));
+  ].map((m) => ({
+    sha: m[2], reason: "codex-summary-completed",
+    completedAt: timestamp(m[1].match(/<relative-time datetime="([^"]+)"/)?.[1]),
+  }));
 }
 
 for (const name of ["REPO", "PR", "HEAD_SHA", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]) {
@@ -181,22 +223,35 @@ while (true) {
   let cleanReason = "";
   let resolutionError = "";
   const headSha = process.env.HEAD_SHA.toLowerCase();
-  // The summary row is edited independently of the reviews. When a
-  // current-head Codex review with findings is dismissed, the row can still
-  // read Completed; accepting it would revive the review the loop above
-  // deliberately rejected.
-  const dismissedAtHead = result.reviews.some(
+  // Reject the completed result that preceded a dismissal, but permit a
+  // later review of the same head. The row's completion time matters: a
+  // summary comment is edited independently, and its updated_at alone does
+  // not identify which review was completed. Unknown dismissal state falls
+  // back to Claude rather than accepting stale evidence.
+  const dismissedAtHead = result.reviews.filter(
     (review) =>
       isCodexBot(review?.user) &&
       review?.commit_id?.toLowerCase() === headSha &&
       review?.state === "DISMISSED"
   );
+  let boundary;
+  let dismissalError = "";
   search: for (const comment of commentsResult.comments) {
     if (!isCodexBot(comment?.user)) continue;
-    for (const { sha, reason } of reviewedCommits(comment?.body)) {
-      if (reason === "codex-summary-completed" && dismissedAtHead) continue;
+    for (const { sha, reason, completedAt } of reviewedCommits(comment?.body)) {
       const abbreviatedSha = sha.toLowerCase();
       if (!headSha.startsWith(abbreviatedSha)) continue;
+      if (reason === "codex-summary-completed" && dismissedAtHead.length > 0) {
+        boundary ||= dismissalBoundary(dismissedAtHead);
+        if (boundary.error) {
+          dismissalError = boundary.error;
+          continue;
+        }
+        // Events have second precision. A completion in that same second
+        // cannot establish ordering, so it must also take the safer path.
+        if (!Number.isFinite(completedAt) || completedAt < boundary.latest + 1000 ||
+            !(timestamp(comment.updated_at) >= completedAt)) continue;
+      }
 
       if (abbreviatedSha.length === 40) {
         cleanComment = comment;
@@ -215,6 +270,13 @@ while (true) {
         break search;
       }
     }
+  }
+
+  if (!cleanComment && dismissalError) {
+    console.log(`::warning::Could not correlate dismissed Codex reviews: ${dismissalError}`);
+    finish(false, "codex-status-error", "",
+      "Could not establish current-head review dismissal times; falling back to Claude.");
+    break;
   }
 
   if (!cleanComment && resolutionError) {
