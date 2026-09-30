@@ -98,3 +98,74 @@ test("a pre-inference API rejection is reported without exposing the transcript 
   assert.doesNotMatch(output, /TRANSCRIPT MUST STAY HIDDEN/);
   assert.doesNotMatch(output, /sk-ant-api01-secretvalue/);
 });
+
+function stepBlock(name) {
+  const marker = `      - name: ${name}\n`;
+  const start = workflow.indexOf(marker);
+  assert.notStrictEqual(start, -1, `workflow step '${name}' is missing`);
+  const next = workflow.indexOf("\n      - name: ", start + marker.length);
+  return workflow.slice(start, next === -1 ? undefined : next);
+}
+
+test("the API rejection step runs after the review fails, not only after it succeeds", () => {
+  // An `if:` with no status function is implicitly `success() && ...`, so a
+  // step gated only on a failed predecessor can never run (crossroads-ci#66).
+  const ifLine = stepBlock("Expose sanitized Claude API rejection").match(/^\s+if: (.*)$/m);
+  assert.ok(ifLine, "the step must carry an if:");
+  assert.match(ifLine[1], /\bfailure\(\)|\balways\(\)|!cancelled\(\)/);
+  assert.match(ifLine[1], /steps\.review\.outcome == 'failure'/);
+});
+
+test("inline comments post live instead of through the action's shared /tmp buffer", () => {
+  // The action buffers to a fixed /tmp path that outlives the job on
+  // persistent runners and is never deleted; without an Anthropic API key it
+  // then posts every stale entry to whatever PR runs next (crossroads-ci#66).
+  assert.match(
+    stepBlock("Claude review"),
+    /^\s+classify_inline_comments: 'false'\s*$/m
+  );
+});
+
+function runRejectionStep(t, result) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-api-error-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const summary = path.join(tempDir, "summary.md");
+  const terminal = {
+    type: "result",
+    subtype: "success",
+    is_error: true,
+    num_turns: 1,
+    total_cost_usd: 0,
+    modelUsage: {}
+  };
+  if (result !== undefined) terminal.result = result;
+  fs.writeFileSync(
+    path.join(tempDir, "claude-execution-output.json"),
+    JSON.stringify([
+      { type: "assistant", message: { content: [{ type: "text", text: "TRANSCRIPT MUST STAY HIDDEN" }] } },
+      terminal
+    ])
+  );
+  childProcess.execFileSync("bash", ["-c", runScriptForStep("Expose sanitized Claude API rejection")], {
+    env: {
+      ...process.env,
+      EXECUTION_FILE: path.join(tempDir, "claude-execution-output.json"),
+      GITHUB_STEP_SUMMARY: summary
+    }
+  });
+  return fs.existsSync(summary) ? fs.readFileSync(summary, "utf8") : "";
+}
+
+test("a pre-inference rejection is reported whatever its wording, since no model ran", (t) => {
+  // crossroads-ci#67's own run: is_error, zero cost, empty modelUsage, and a
+  // result that did not start with "API Error:" -- so nothing was printed.
+  const output = runRejectionStep(t, "Invalid bearer token sk-ant-oat01-secretvalue");
+  assert.match(output, /Invalid bearer token \[REDACTED\]/);
+  assert.doesNotMatch(output, /sk-ant-oat01-secretvalue/);
+  assert.doesNotMatch(output, /TRANSCRIPT MUST STAY HIDDEN/);
+});
+
+test("a pre-inference rejection with no result text says so instead of printing nothing", (t) => {
+  assert.match(runRejectionStep(t, undefined), /no result text/i);
+  assert.match(runRejectionStep(t, ""), /no result text/i);
+});
