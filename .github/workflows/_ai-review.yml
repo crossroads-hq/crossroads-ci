@@ -328,7 +328,7 @@ jobs:
         # The REMOTE pin, not `./actions/...`: in a reusable workflow consumed
         # cross-repo, a relative path resolves against the CALLER's checkout,
         # which at this point in the job does not exist.
-        uses: crossroads-hq/crossroads-ci/actions/detect-reviewable@c31f4463d37d14e4ae761a431d414effb941aec9 # main
+        uses: crossroads-hq/crossroads-ci/actions/detect-reviewable@4ef8a6f07309d5e81cd07938223d39591076b384 # guidance-file detection (PR #71)
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
