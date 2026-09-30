@@ -136,7 +136,6 @@ while (true) {
   const match = result.reviews.find(
     (review) =>
       isCodexBot(review?.user) &&
-      review?.commit_id === process.env.HEAD_SHA &&
       review?.submitted_at &&
       SUBMITTED_STATES.has(review?.state)
   );
