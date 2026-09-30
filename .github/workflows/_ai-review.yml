@@ -777,7 +777,7 @@ jobs:
         # rather than seconds; re-measure before raising this default or the
         # Codex wait.
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6 # v1.0.234
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         with:
           anthropic_api_key: ${{ secrets.anthropic-api-key }}
           # Only when no key was passed. The action exports both to Claude
