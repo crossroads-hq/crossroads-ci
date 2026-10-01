@@ -13,15 +13,23 @@ window fails before any test runs ([#50](https://github.com/crossroads-hq/crossr
 any runner is executing a job (a `Runner.Worker` process):
 
 - A job is running: the idle clock resets.
-- Idle: the clock keeps counting. Only after **`IDLE_MINUTES` (default 30) of
-  unbroken idle** does it update, at most once every **`MIN_INTERVAL_HOURS`
-  (default 24)**.
-- To update, it re-checks for a job, pauses the runner services so none can
-  start mid-update (GitHub queues jobs meanwhile), runs `apt-get update` and
-  `upgrade`, and resumes the runners, even if the update fails.
+- Idle: idle time is counted from the later of the first idle poll and the
+  newest runner job log (`_diag/Worker_*.log`, written throughout each job),
+  so a job that starts and ends between two polls still counts. Only after
+  **`IDLE_MINUTES` (default 30) of unbroken idle** does it update, at most once
+  every **`MIN_INTERVAL_HOURS` (default 24)**, measured from when the last
+  update finished.
+- To update, it lists the runner units (aborting if that fails), re-checks
+  for a job, pauses the runner services so none can start mid-update (GitHub
+  queues jobs meanwhile), runs `apt-get update` and `upgrade`, and resumes the
+  runners, even if the update fails. The runner has no drain mode, so a job
+  assigned in the instant between that last check and the pause can still be
+  interrupted; the log says so if it happens.
 - It never reboots. A pending reboot is logged for you to do at a quiet moment.
-- It logs a warning when the last update is older than `STALE_WARN_DAYS`
-  (default 7), meaning the host was never idle long enough.
+- It logs a warning once `STALE_WARN_DAYS` (default 7) pass without an update,
+  counted from the first run on a host that has never managed one.
+- The service allows 100 minutes (`TimeoutStartSec`), covering both apt steps
+  at the default `UPDATE_TIMEOUT_MINUTES`; raise both together.
 
 ### Install
 
@@ -37,7 +45,7 @@ defaults to `/etc/default/fleet-idle-update` (edit them there; reinstalling
 never overwrites that file).
 
 `sudo runner-host/install.sh --uninstall` removes it and restores Ubuntu's
-timers.
+timers. It waits for an update already in progress rather than killing apt.
 
 ### Watch it
 

@@ -6,6 +6,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# systemd's default start timeout (90s) would kill an ordinary update midway.
+# Cover both apt steps at the default UPDATE_TIMEOUT_MINUTES (2 x 45m) plus
+# margin; raise this with that setting.
+TimeoutStartSec=100min
 EnvironmentFile=-/etc/default/fleet-idle-update
 ExecStart=/usr/local/sbin/fleet-idle-update
 # Lower than the CI jobs it waits for, should both ever run at once.

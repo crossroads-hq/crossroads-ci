@@ -13,7 +13,7 @@ const { spawnSync } = require("node:child_process");
 const SCRIPT = path.join(__dirname, "fleet-idle-update.sh");
 const UNITS = ["actions.runner.crossroads-hq.wsl-fleet-1.service", "actions.runner.crossroads-hq.wsl-fleet-2.service"];
 
-function host({ aptFails = false } = {}) {
+function host({ aptFails = false, listFails = false, aptMinutes = 0 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "idle-update-"));
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
@@ -21,8 +21,14 @@ function host({ aptFails = false } = {}) {
   fs.writeFileSync(calls, "");
   const stub = (name, body) =>
     fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`, { mode: 0o755 });
-  stub("systemctl", `[ "$1" = list-units ] && printf '%s loaded active running x\\n' ${UNITS.join(" ")}; exit 0`);
-  stub("apt-get", aptFails ? 'exit 100' : 'exit 0');
+  const clock = path.join(dir, "now");
+  const diag = path.join(dir, "diag");
+  fs.mkdirSync(diag);
+  stub("systemctl", listFails
+    ? `[ "$1" = list-units ] && exit 1; exit 0`
+    : `[ "$1" = list-units ] && printf '%s loaded active running x\\n' ${UNITS.join(" ")}; exit 0`);
+  // apt "takes" aptMinutes: it advances the clock file, as a long update would.
+  stub("apt-get", aptFails ? "exit 100" : `echo $(( $(cat "${clock}") + ${aptMinutes} * 60 )) > "${clock}"`);
   // Busy answers come from a queue file, one line per call, so a scenario can
   // say "idle, then busy" for the last-moment re-check. Empty queue = idle.
   const queue = path.join(dir, "busy-queue");
@@ -31,12 +37,13 @@ function host({ aptFails = false } = {}) {
   const state = path.join(dir, "state");
 
   const run = (now, busy = []) => {
+    fs.writeFileSync(clock, String(now));
     fs.writeFileSync(queue, busy.join("\n") + (busy.length ? "\n" : ""));
     const r = spawnSync("bash", [SCRIPT], {
       encoding: "utf8",
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-        NOW: String(now), STATE_DIR: state, IDLE_MINUTES: "30", MIN_INTERVAL_HOURS: "24", STALE_WARN_DAYS: "7",
+        NOW_FILE: clock, WORKER_LOGS: path.join(diag, "Worker_*.log"), STATE_DIR: state, IDLE_MINUTES: "30", MIN_INTERVAL_HOURS: "24", STALE_WARN_DAYS: "7",
         SYSTEMCTL: path.join(bin, "systemctl"), APT_GET: path.join(bin, "apt-get"),
         BUSY_CMD: path.join(bin, "busy"), TIMEOUT_CMD: "", REBOOT_FLAG: path.join(dir, "reboot-required"),
       },
@@ -47,7 +54,9 @@ function host({ aptFails = false } = {}) {
   const reset = () => fs.writeFileSync(calls, "");
   const has = (f) => fs.existsSync(path.join(state, f)) && fs.readFileSync(path.join(state, f), "utf8").trim();
   const updated = () => log().some((l) => l.endsWith(" upgrade"));
-  return { dir, run, log, reset, has, updated, setState: (f, v) => { fs.mkdirSync(state, { recursive: true }); fs.writeFileSync(path.join(state, f), `${v}\n`); } };
+  // A job log whose last write was at `at` (epoch seconds).
+  const jobLog = (name, at) => { const f = path.join(diag, `Worker_${name}.log`); fs.writeFileSync(f, ""); fs.utimesSync(f, at, at); };
+  return { dir, run, log, reset, has, updated, jobLog, setState: (f, v) => { fs.mkdirSync(state, { recursive: true }); fs.writeFileSync(path.join(state, f), `${v}\n`); } };
 }
 
 const T0 = 1_700_000_000;
@@ -134,7 +143,7 @@ test("a host that never stays idle long enough is warned about", () => {
   const h = host();
   h.setState("last-success", T0);
   const r = h.run(T0 + 8 * 86400, ["busy"]);
-  assert.match(r.out, /WARNING: last update was 8 days ago/);
+  assert.match(r.out, /WARNING: no update for 8 days/);
 });
 
 test("a pending reboot is reported, never performed", () => {
@@ -144,4 +153,43 @@ test("a pending reboot is reported, never performed", () => {
   const r = h.run(T0 + 30 * MIN);
   assert.match(r.out, /requires a reboot/);
   assert.equal(h.log().some((l) => /reboot|shutdown/.test(l)), false);
+});
+
+test("a job that ran between two polls still resets idle (job logs)", () => {
+  // Codex on #79: polling alone misses a job from minute 21 to 29.
+  const h = host();
+  h.run(T0);
+  h.jobLog("between", T0 + 29 * MIN);  // started and ended between polls
+  h.run(T0 + 30 * MIN);                // poll sees no worker running
+  assert.equal(h.updated(), false, "idle only 1 minute since that job");
+  h.run(T0 + 58 * MIN);
+  assert.equal(h.updated(), false, "29 minutes since the job");
+  h.run(T0 + 60 * MIN);
+  assert.equal(h.updated(), true, "31 minutes since the job");
+});
+
+test("a failed runner-unit listing aborts instead of updating with runners live", () => {
+  const h = host({ listFails: true });
+  h.run(T0);
+  const r = h.run(T0 + 31 * MIN);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /could not list runner units/);
+  assert.equal(h.updated(), false);
+  assert.equal(h.log().some((l) => l.startsWith("systemctl stop")), false);
+});
+
+test("a host busy since installation warns once STALE_WARN_DAYS pass", () => {
+  // Codex on #79: with no last-success, the warning never fired.
+  const h = host();
+  h.run(T0, ["busy"]);                          // first run, never idle
+  assert.doesNotMatch(h.run(T0 + 6 * 86400, ["busy"]).out, /WARNING/);
+  assert.match(h.run(T0 + 8 * 86400, ["busy"]).out, /WARNING: no update for 8 days/);
+});
+
+test("last-success is stamped when the update finishes, not when it starts", () => {
+  // Codex on #79: an hour-long update made the next one due 23h later.
+  const h = host({ aptMinutes: 60 });           // update + upgrade: 2 hours
+  h.run(T0);
+  h.run(T0 + 30 * MIN);
+  assert.equal(h.has("last-success"), String(T0 + 30 * MIN + 120 * MIN));
 });

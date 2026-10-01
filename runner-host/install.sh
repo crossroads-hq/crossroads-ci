@@ -19,6 +19,12 @@ no_periodic=/etc/apt/apt.conf.d/99-fleet-no-periodic
 
 if [ "${1:-}" = "--uninstall" ]; then
   systemctl disable --now fleet-idle-update.timer 2>/dev/null || true
+  # Disabling the timer does not end a run already in progress. Wait for it
+  # rather than stop it: killing apt mid-upgrade can leave dpkg half-configured.
+  while systemctl is-active --quiet fleet-idle-update.service; do
+    echo "an update is in progress; waiting for it to finish"
+    sleep 10
+  done
   rm -f /etc/systemd/system/fleet-idle-update.service \
         /etc/systemd/system/fleet-idle-update.timer \
         /usr/local/sbin/fleet-idle-update "$no_periodic"
