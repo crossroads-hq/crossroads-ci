@@ -49,15 +49,14 @@ read_state() {
 write_state() { printf '%s\n' "$2" > "$STATE_DIR/$1"; }
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 # Epoch of the newest runner job log, or 0 when there is none.
+# One `ls -t` and one stat, not a stat per file: the runners never prune
+# _diag, and on the host 8,201 logs took 56s to walk one by one against 0.06s
+# for a single sorted listing -- every poll while idle, growing with each job.
 last_job_activity() {
-  local newest=0 f m
-  # shellcheck disable=SC2086 # WORKER_LOGS is a glob, expanded on purpose
-  for f in $WORKER_LOGS; do
-    [ -e "$f" ] || continue
-    m="$(mtime "$f")"
-    [ "$m" -gt "$newest" ] && newest="$m"
-  done
-  echo "$newest"
+  local newest
+  # shellcheck disable=SC2012,SC2086 # ls -t is the portable mtime sort; WORKER_LOGS is a glob
+  newest="$(ls -1t $WORKER_LOGS 2>/dev/null | head -n 1 || true)"
+  if [ -n "$newest" ] && [ -e "$newest" ]; then mtime "$newest"; else echo 0; fi
 }
 
 mkdir -p "$STATE_DIR"

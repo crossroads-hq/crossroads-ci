@@ -193,3 +193,15 @@ test("last-success is stamped when the update finishes, not when it starts", () 
   h.run(T0 + 30 * MIN);
   assert.equal(h.has("last-success"), String(T0 + 30 * MIN + 120 * MIN));
 });
+
+test("the newest job log wins among many, and none at all reads as no activity", () => {
+  // The scan sorts once rather than stat-ing every log (8,201 on the host).
+  const h = host();
+  for (let i = 0; i < 50; i++) h.jobLog(`old-${i}`, T0 - 3600 - i);
+  h.jobLog("newest", T0 + 10 * MIN);
+  h.run(T0);
+  h.run(T0 + 39 * MIN);
+  assert.equal(h.updated(), false, "29 minutes since the newest log");
+  h.run(T0 + 41 * MIN);
+  assert.equal(h.updated(), true, "31 minutes since the newest log");
+});
