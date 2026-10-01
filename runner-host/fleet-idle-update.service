@@ -1,0 +1,13 @@
+[Unit]
+Description=Update packages only when every CI runner on this host has been idle
+Documentation=https://github.com/crossroads-hq/crossroads-ci/tree/main/runner-host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/fleet-idle-update
+ExecStart=/usr/local/sbin/fleet-idle-update
+# Lower than the CI jobs it waits for, should both ever run at once.
+Nice=10
+IOSchedulingClass=idle

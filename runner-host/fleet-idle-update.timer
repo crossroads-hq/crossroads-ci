@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every 10 minutes whether the runner host is idle enough to update
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
