@@ -50,6 +50,7 @@ jobs:
               - 'scripts/**'
               - 'governance/**'
               - 'actions/**'
+              - 'runner-host/**'
 
   workflow-lint:
     name: Workflow lint
@@ -79,11 +80,13 @@ jobs:
         run: |
           set -euo pipefail
           n=0
-          for f in scripts/*.sh; do bash -n "$f"; n=$((n + 1)); done
+          for f in scripts/*.sh runner-host/*.sh; do bash -n "$f"; n=$((n + 1)); done
           echo "bash -n clean on ${n} scripts"
 
       - name: shellcheck
-        run: shellcheck scripts/*.sh
+        run: shellcheck scripts/*.sh runner-host/*.sh
+      - name: Runner host tests
+        run: node --test runner-host/*.test.js
 
       - name: Governance profiles parse and render
         run: |

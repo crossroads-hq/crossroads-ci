@@ -1,0 +1,11 @@
+# /etc/default/fleet-idle-update -- installed once by runner-host/install.sh,
+# never overwritten afterwards, so local changes survive reinstalls.
+
+# Every runner must be idle this long, without a break, before an update.
+IDLE_MINUTES=30
+# At most one update per this many hours.
+MIN_INTERVAL_HOURS=24
+# Log a warning once the last update is older than this.
+STALE_WARN_DAYS=7
+# Hard bound on each apt-get step; runners restart even if it is hit.
+UPDATE_TIMEOUT_MINUTES=45
