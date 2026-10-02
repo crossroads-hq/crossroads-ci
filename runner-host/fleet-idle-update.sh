@@ -28,7 +28,8 @@ STALE_WARN_DAYS="${STALE_WARN_DAYS:-7}"
 UPDATE_TIMEOUT_MINUTES="${UPDATE_TIMEOUT_MINUTES:-45}"
 STATE_DIR="${STATE_DIR:-/var/lib/fleet-idle-update}"
 RUNNER_UNITS="${RUNNER_UNITS:-actions.runner.*}"
-WORKER_LOGS="${WORKER_LOGS:-/home/*/actions-runner*/_diag/Worker_*.log}"
+# Runner diagnostic folders; each holds one Worker_*.log per job.
+WORKER_LOG_DIRS="${WORKER_LOG_DIRS:-/home/*/actions-runner*/_diag}"
 SYSTEMCTL="${SYSTEMCTL:-systemctl}"
 APT_GET="${APT_GET:-apt-get}"
 # A job is running when the runner has spawned its worker process. The listener
@@ -48,16 +49,34 @@ read_state() {
 }
 write_state() { printf '%s\n' "$2" > "$STATE_DIR/$1"; }
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
-# Epoch of the newest runner job log, or 0 when there is none.
+# Epoch of the newest runner job log, or 0 when there is none; fails when a
+# folder cannot be read, because "unknown" must never pass for "no jobs".
+# Each folder is listed by `ls -t` reading the directory itself, so no file
+# names travel through argv: a per-file stat walk took 56s over the host's
+# 8,201 logs, and globbing every path into one argv would eventually exceed
+# ARG_MAX and fail.
 last_job_activity() {
-  local newest=0 f m
-  # shellcheck disable=SC2086 # WORKER_LOGS is a glob, expanded on purpose
-  for f in $WORKER_LOGS; do
-    [ -e "$f" ] || continue
-    m="$(mtime "$f")"
-    [ "$m" -gt "$newest" ] && newest="$m"
+  local newest=0 dir listing name m
+  # shellcheck disable=SC2086 # WORKER_LOG_DIRS is a glob of a few folders
+  for dir in $WORKER_LOG_DIRS; do
+    [ -d "$dir" ] || continue
+    # shellcheck disable=SC2012 # ls -t is the portable mtime sort
+    listing="$(ls -1t "$dir")" || return 1
+    name="$(printf '%s\n' "$listing" | grep -m1 '^Worker_.*\.log$' || true)"
+    [ -n "$name" ] || continue
+    m="$(mtime "$dir/$name")" || return 1
+    if [ "$m" -gt "$newest" ]; then newest="$m"; fi
   done
   echo "$newest"
+}
+# last_job_activity, or stop: an unreadable job log means idle is unknown.
+job_activity() {
+  local v
+  if ! v="$(last_job_activity)"; then
+    log "ERROR: could not read runner job logs; idle unknown, not updating" >&2
+    exit 1
+  fi
+  echo "$v"
 }
 
 mkdir -p "$STATE_DIR"
@@ -95,7 +114,7 @@ if [ -z "$idle_since" ]; then
   write_state idle-since "$now"
   idle_since="$now"
 fi
-job_end="$(last_job_activity)"
+job_end="$(job_activity)"
 [ "$job_end" -gt "$idle_since" ] && idle_since="$job_end"
 idle_for=$(( now - idle_since ))
 if [ "$idle_for" -lt $(( IDLE_MINUTES * 60 )) ]; then
@@ -120,7 +139,10 @@ done < <(printf '%s\n' "$listing" | awk 'NF {print $1}')
 # touched since this moment is reported after the stop, so such a loss is
 # never silent.
 checked_at="$(clock)"
-if busy || [ "$(last_job_activity)" -gt "$job_end" ]; then
+# A standalone assignment, so a failed scan stops the run under set -e. Inside
+# `[ "$(...)" ]` the failure would be discarded and the update would go ahead.
+if busy; then final_scan="busy"; else final_scan="$(job_activity)"; fi
+if [ "$final_scan" = busy ] || [ "$final_scan" -gt "$job_end" ]; then
   rm -f "$STATE_DIR/idle-since"
   log "a job started at the last moment; idle clock reset"
   exit 0
@@ -135,7 +157,8 @@ restart_runners() {
 trap restart_runners EXIT
 if [ "${#units[@]}" -gt 0 ]; then
   "$SYSTEMCTL" stop "${units[@]}"
-  if [ "$(last_job_activity)" -ge "$checked_at" ] && [ "$(last_job_activity)" -gt "$job_end" ]; then
+  after_stop="$(job_activity)"
+  if [ "$after_stop" -ge "$checked_at" ] && [ "$after_stop" -gt "$job_end" ]; then
     log "WARNING: a job began as the runners were paused and was interrupted; re-run it"
   fi
   log "idle for $(( idle_for / 60 )) minutes; runners paused (${#units[@]}), updating"

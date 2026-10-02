@@ -19,11 +19,11 @@ function host({ aptFails = false, listFails = false, aptMinutes = 0 } = {}) {
   fs.mkdirSync(bin);
   const calls = path.join(dir, "calls");
   fs.writeFileSync(calls, "");
-  const stub = (name, body) =>
-    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`, { mode: 0o755 });
   const clock = path.join(dir, "now");
   const diag = path.join(dir, "diag");
   fs.mkdirSync(diag);
+  const stub = (name, body) =>
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`, { mode: 0o755 });
   stub("systemctl", listFails
     ? `[ "$1" = list-units ] && exit 1; exit 0`
     : `[ "$1" = list-units ] && printf '%s loaded active running x\\n' ${UNITS.join(" ")}; exit 0`);
@@ -33,7 +33,9 @@ function host({ aptFails = false, listFails = false, aptMinutes = 0 } = {}) {
   // say "idle, then busy" for the last-moment re-check. Empty queue = idle.
   const queue = path.join(dir, "busy-queue");
   fs.writeFileSync(queue, "");
-  stub("busy", `line="$(head -n1 "${queue}")"; tail -n +2 "${queue}" > "${queue}.t"; mv "${queue}.t" "${queue}"; [ "$line" = busy ]`);
+  // A "lockdiag" entry answers idle but first makes the job-log folder
+  // unreadable, to fail a later scan in the same run.
+  stub("busy", `line="$(head -n1 "${queue}")"; tail -n +2 "${queue}" > "${queue}.t"; mv "${queue}.t" "${queue}"; [ "$line" = lockdiag ] && chmod 000 "${diag}"; [ "$line" = busy ]`);
   const state = path.join(dir, "state");
 
   const run = (now, busy = []) => {
@@ -43,7 +45,7 @@ function host({ aptFails = false, listFails = false, aptMinutes = 0 } = {}) {
       encoding: "utf8",
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-        NOW_FILE: clock, WORKER_LOGS: path.join(diag, "Worker_*.log"), STATE_DIR: state, IDLE_MINUTES: "30", MIN_INTERVAL_HOURS: "24", STALE_WARN_DAYS: "7",
+        NOW_FILE: clock, WORKER_LOG_DIRS: path.join(dir, "di*"), STATE_DIR: state, IDLE_MINUTES: "30", MIN_INTERVAL_HOURS: "24", STALE_WARN_DAYS: "7",
         SYSTEMCTL: path.join(bin, "systemctl"), APT_GET: path.join(bin, "apt-get"),
         BUSY_CMD: path.join(bin, "busy"), TIMEOUT_CMD: "", REBOOT_FLAG: path.join(dir, "reboot-required"),
       },
@@ -192,4 +194,57 @@ test("last-success is stamped when the update finishes, not when it starts", () 
   h.run(T0);
   h.run(T0 + 30 * MIN);
   assert.equal(h.has("last-success"), String(T0 + 30 * MIN + 120 * MIN));
+});
+
+test("the newest job log wins among many, and none at all reads as no activity", () => {
+  // The scan sorts once rather than stat-ing every log (8,201 on the host).
+  const h = host();
+  for (let i = 0; i < 50; i++) h.jobLog(`old-${i}`, T0 - 3600 - i);
+  h.jobLog("newest", T0 + 10 * MIN);
+  h.run(T0);
+  h.run(T0 + 39 * MIN);
+  assert.equal(h.updated(), false, "29 minutes since the newest log");
+  h.run(T0 + 41 * MIN);
+  assert.equal(h.updated(), true, "31 minutes since the newest log");
+});
+
+test("an unreadable job-log folder stops the run instead of reading as idle", () => {
+  // Codex on #80: a listing failure must not pass for "no recent jobs".
+  const h = host();
+  h.run(T0);
+  fs.chmodSync(path.join(h.dir, "diag"), 0o000);
+  try {
+    const r = h.run(T0 + 31 * MIN);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /could not read runner job logs/);
+    assert.equal(h.updated(), false);
+    assert.equal(h.log().some((l) => l.startsWith("systemctl stop")), false);
+  } finally {
+    fs.chmodSync(path.join(h.dir, "diag"), 0o755);
+  }
+});
+
+test("non-job files in the log folder are ignored", () => {
+  const h = host();
+  fs.writeFileSync(path.join(h.dir, "diag", "Runner_x.log"), "");
+  fs.utimesSync(path.join(h.dir, "diag", "Runner_x.log"), T0 + 29 * MIN, T0 + 29 * MIN);
+  h.run(T0);
+  h.run(T0 + 31 * MIN);
+  assert.equal(h.updated(), true, "a Runner_ log is the listener, not a job");
+});
+
+test("an unreadable job-log folder at the final pre-stop check still stops the run", () => {
+  // Codex on #80: inside `[ "$(...)" -gt ... ]` a failed scan was swallowed
+  // and the run went on to pause runners and update.
+  const h = host();
+  h.run(T0);
+  try {
+    const r = h.run(T0 + 31 * MIN, ["idle", "lockdiag"]);  // 2nd busy check precedes the final scan
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /could not read runner job logs/);
+    assert.equal(h.updated(), false);
+    assert.equal(h.log().some((l) => l.startsWith("systemctl stop")), false);
+  } finally {
+    fs.chmodSync(path.join(h.dir, "diag"), 0o755);
+  }
 });
