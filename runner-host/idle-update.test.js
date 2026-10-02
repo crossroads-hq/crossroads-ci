@@ -43,7 +43,7 @@ function host({ aptFails = false, listFails = false, aptMinutes = 0 } = {}) {
       encoding: "utf8",
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-        NOW_FILE: clock, WORKER_LOGS: path.join(diag, "Worker_*.log"), STATE_DIR: state, IDLE_MINUTES: "30", MIN_INTERVAL_HOURS: "24", STALE_WARN_DAYS: "7",
+        NOW_FILE: clock, WORKER_LOG_DIRS: path.join(dir, "di*"), STATE_DIR: state, IDLE_MINUTES: "30", MIN_INTERVAL_HOURS: "24", STALE_WARN_DAYS: "7",
         SYSTEMCTL: path.join(bin, "systemctl"), APT_GET: path.join(bin, "apt-get"),
         BUSY_CMD: path.join(bin, "busy"), TIMEOUT_CMD: "", REBOOT_FLAG: path.join(dir, "reboot-required"),
       },
@@ -204,4 +204,29 @@ test("the newest job log wins among many, and none at all reads as no activity",
   assert.equal(h.updated(), false, "29 minutes since the newest log");
   h.run(T0 + 41 * MIN);
   assert.equal(h.updated(), true, "31 minutes since the newest log");
+});
+
+test("an unreadable job-log folder stops the run instead of reading as idle", () => {
+  // Codex on #80: a listing failure must not pass for "no recent jobs".
+  const h = host();
+  h.run(T0);
+  fs.chmodSync(path.join(h.dir, "diag"), 0o000);
+  try {
+    const r = h.run(T0 + 31 * MIN);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /could not read runner job logs/);
+    assert.equal(h.updated(), false);
+    assert.equal(h.log().some((l) => l.startsWith("systemctl stop")), false);
+  } finally {
+    fs.chmodSync(path.join(h.dir, "diag"), 0o755);
+  }
+});
+
+test("non-job files in the log folder are ignored", () => {
+  const h = host();
+  fs.writeFileSync(path.join(h.dir, "diag", "Runner_x.log"), "");
+  fs.utimesSync(path.join(h.dir, "diag", "Runner_x.log"), T0 + 29 * MIN, T0 + 29 * MIN);
+  h.run(T0);
+  h.run(T0 + 31 * MIN);
+  assert.equal(h.updated(), true, "a Runner_ log is the listener, not a job");
 });

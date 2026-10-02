@@ -14,7 +14,8 @@ any runner is executing a job (a `Runner.Worker` process):
 
 - A job is running: the idle clock resets.
 - Idle: idle time is counted from the later of the first idle poll and the
-  newest runner job log (`_diag/Worker_*.log`, written throughout each job),
+  newest runner job log (`_diag/Worker_*.log`, written throughout each job;
+  an unreadable log folder stops the run rather than reading as idle),
   so a job that starts and ends between two polls still counts. Only after
   **`IDLE_MINUTES` (default 30) of unbroken idle** does it update, at most once
   every **`MIN_INTERVAL_HOURS` (default 24)**, measured from when the last
@@ -43,6 +44,12 @@ This masks `apt-daily.timer` and `apt-daily-upgrade.timer`, turns off apt's
 periodic settings, installs the script, service and timer, and writes the
 defaults to `/etc/default/fleet-idle-update` (edit them there; reinstalling
 never overwrites that file).
+
+It also installs `/etc/tmpfiles.d/fleet-runner-diag.conf`, which prunes runner
+diagnostic logs older than 14 days (`DIAG_RETAIN_DAYS`) through Ubuntu's
+daily `systemd-tmpfiles-clean.timer`. The runners never prune `_diag`
+themselves: 8,201 files and 2.1 GB on 2026-10-01. The runners' `blocks/` and
+`pages/` caches are excluded.
 
 `sudo runner-host/install.sh --uninstall` removes it and restores Ubuntu's
 timers. It waits for an update already in progress rather than killing apt.

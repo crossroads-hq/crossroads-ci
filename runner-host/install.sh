@@ -16,6 +16,10 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 apt_timers=(apt-daily.timer apt-daily-upgrade.timer)
 no_periodic=/etc/apt/apt.conf.d/99-fleet-no-periodic
+# Runners never prune their _diag logs (8,201 files, 2.1 GB on 2026-10-01).
+# systemd-tmpfiles-clean.timer, already daily on Ubuntu, applies this rule.
+diag_rule=/etc/tmpfiles.d/fleet-runner-diag.conf
+DIAG_RETAIN_DAYS="${DIAG_RETAIN_DAYS:-14}"
 
 if [ "${1:-}" = "--uninstall" ]; then
   systemctl disable --now fleet-idle-update.timer 2>/dev/null || true
@@ -27,7 +31,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   done
   rm -f /etc/systemd/system/fleet-idle-update.service \
         /etc/systemd/system/fleet-idle-update.timer \
-        /usr/local/sbin/fleet-idle-update "$no_periodic"
+        /usr/local/sbin/fleet-idle-update "$no_periodic" "$diag_rule"
   systemctl unmask "${apt_timers[@]}"
   systemctl daemon-reload
   systemctl enable --now "${apt_timers[@]}"
@@ -46,6 +50,16 @@ cat > "$no_periodic" <<'CONF'
 // through fleet-idle-update.timer, when every runner is idle.
 APT::Periodic::Update-Package-Lists "0";
 APT::Periodic::Unattended-Upgrade "0";
+CONF
+
+cat > "$diag_rule" <<CONF
+# Managed by crossroads-ci runner-host/install.sh. Prune runner diagnostic
+# logs older than ${DIAG_RETAIN_DAYS} days. The newest job log, which
+# fleet-idle-update reads, is always recent. The runner's own blocks/ and
+# pages/ caches are left alone.
+e /home/*/actions-runner*/_diag - - - ${DIAG_RETAIN_DAYS}d
+x /home/*/actions-runner*/_diag/blocks
+x /home/*/actions-runner*/_diag/pages
 CONF
 
 systemctl disable --now "${apt_timers[@]}" 2>/dev/null || true
