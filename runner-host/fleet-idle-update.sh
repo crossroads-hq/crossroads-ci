@@ -139,7 +139,10 @@ done < <(printf '%s\n' "$listing" | awk 'NF {print $1}')
 # touched since this moment is reported after the stop, so such a loss is
 # never silent.
 checked_at="$(clock)"
-if busy || [ "$(job_activity)" -gt "$job_end" ]; then
+# A standalone assignment, so a failed scan stops the run under set -e. Inside
+# `[ "$(...)" ]` the failure would be discarded and the update would go ahead.
+if busy; then final_scan="busy"; else final_scan="$(job_activity)"; fi
+if [ "$final_scan" = busy ] || [ "$final_scan" -gt "$job_end" ]; then
   rm -f "$STATE_DIR/idle-since"
   log "a job started at the last moment; idle clock reset"
   exit 0
