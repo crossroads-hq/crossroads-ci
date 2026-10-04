@@ -105,7 +105,8 @@ which of the two states the host is in.
 **How much room that is.** Inside WSL the root disk reports 1007 GB, but it
 is a virtual disk: one file, `ext4.vhdx`, on the Windows `C:` volume. On
 2026-10-04 that file was 75 GB, fully allocated and not sparse, and `C:` had
-83 GB free of 237 GB. So `/tmp` can grow by about 83 GB, not 900 GB, and
+83 GB free of 237 GB. So `/tmp` can grow by about 100 GB (20 GB of slack
+inside the file, then the 83 GB), not 900 GB, and
 filling `C:` stalls the whole VM and Windows with it. Both cleaners stay for
 that reason. To read the real numbers, in PowerShell on the Windows side:
 
@@ -114,10 +115,20 @@ Get-Volume C
 Get-ChildItem "$env:LOCALAPPDATA\wsl" -Recurse -Filter ext4.vhdx
 ```
 
-Whether deleting files in Linux gives the space back to `C:` is
-**unverified**. The disk is not sparse (`sparseVhd=true` in `.wslconfig`
-applies only to disks created after it was set), so assume growth is one-way
-until it is tested or the disk is compacted.
+Deleting files in Linux does **not** give the space back to `C:`. The disk
+is not sparse (`sparseVhd=true` in `.wslconfig` applies only to disks created
+after it was set), so the file only grows. Tested 2026-10-04: with Linux using
+55 GB, the file stayed at 74.975 GB allocated through a 2 GB write, its
+deletion and `fstrim` (which trimmed 925 GiB on its first run), and `C:` free
+space did not move. The 20 GB between what Linux uses and the file's size is
+room already taken from `C:`: new scratch data fills that first, and only
+then does the file grow. Getting space back needs the disk compacted with
+WSL shut down, which has not been done. Do not reach for
+`wsl --manage Ubuntu --set-sparse true`: recent WSL releases refuse it
+because of a data-corruption risk unless forced with `--allow-unsafe`
+([microsoft/WSL#13075](https://github.com/microsoft/WSL/issues/13075)).
+WSL's source has a one-time `wsl --manage <distro> --compact`, but the help
+of the host's WSL 2.7.12 does not list it, so check `wsl --help` first.
 
 **What cleans it.** A disk-backed `/tmp` no longer empties at restart.
 
@@ -144,12 +155,52 @@ what is in the tmpfs. In WSL, as root:
    prints `ActiveState=inactive`, `MainPID=0` and an empty `Job=`. On
    `activating`, `deactivating` or a job number, wait. On anything else, or
    if the command fails, start the timer again and find out why first.
-3. Wait until `pgrep -f Runner.Worker` prints nothing, then
-   `systemctl stop 'actions.runner.*'`.
-4. Immediately before shutting down, repeat the check in step 2 and confirm
-   `pgrep -f Runner.Worker` and `pgrep -x 'apt-get|dpkg'` both print nothing.
-   If not, `systemctl start 'actions.runner.*' fleet-idle-update.timer` and
-   start again.
+3. Stop the runners one at a time, each when it has no job. Waiting for the
+   whole fleet to be idle at once does not work on a busy day: on 2026-10-04
+   three 12 to 17 minute jobs overlapped for longer than the wait. A stopped
+   runner takes no new job, so this always finishes.
+
+   ```bash
+   if listing="$(systemctl list-units --type=service --state=active \
+        --plain --no-legend 'actions.runner.*')" && [ -n "$listing" ]; then
+     awk '{print $1}' <<<"$listing" > /root/fleet-units
+     cat /root/fleet-units
+   else
+     echo "could not list the runner units: stop here" >&2
+   fi
+   ```
+
+   Go on only if it printed every runner you expect (four on the fleet host
+   today). A failed or short listing would leave a runner out of the list,
+   still running and free to take a job during the shutdown.
+
+   Keep that list: a glob such as `'actions.runner.*'` only matches units
+   systemd has loaded, so it will not start a runner that is stopped. Then,
+   for each unit in the list, when none of the processes in its control group
+   (`systemctl show <unit> -p ControlGroup --value`, then
+   `/sys/fs/cgroup<that>/cgroup.procs`) is a `Runner.Worker`, run
+   `systemctl stop <unit>`. Repeat until all are stopped.
+4. Immediately before shutting down, repeat the check in step 2, then run
+   this. An empty answer is not enough: `pgrep` exits 1 for "nothing
+   matched" and 2 or 3 when it could not look, and a failed `systemctl` also
+   prints nothing.
+
+   ```bash
+   ok=yes
+   pgrep -f Runner.Worker >/dev/null; [ $? -eq 1 ] || ok=no
+   pgrep -x 'apt-get|dpkg' >/dev/null; [ $? -eq 1 ] || ok=no
+   if left="$(systemctl list-units --type=service --state=active \
+        --plain --no-legend 'actions.runner.*')"; then
+     [ -z "$left" ] || ok=no
+   else
+     ok=no
+   fi
+   echo "safe to shut down: $ok"
+   ```
+
+   Shut down only on `yes`. On `no`,
+   `systemctl start $(cat /root/fleet-units) fleet-idle-update.timer`
+   and start again.
 5. In Windows: `wsl --shutdown`, then run the "WSL AutoStart" scheduled task,
    which holds the VM open. The runner services and timers start at boot.
 6. Leave the host alone for five minutes, then check:
@@ -163,6 +214,9 @@ what is in the tmpfs. In WSL, as root:
    `findmnt /tmp` prints nothing.
 
 To go back: `sudo systemctl unmask tmp.mount` and restart the same way.
+
+The fleet host was moved this way on 2026-10-04: `/tmp` went from 1,048,576
+inodes on tmpfs to the root disk's 67 million.
 
 To free space now rather than wait for the timer:
 
