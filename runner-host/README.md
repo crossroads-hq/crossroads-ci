@@ -151,12 +151,26 @@ what is in the tmpfs. In WSL, as root:
    prints `ActiveState=inactive`, `MainPID=0` and an empty `Job=`. On
    `activating`, `deactivating` or a job number, wait. On anything else, or
    if the command fails, start the timer again and find out why first.
-3. Wait until `pgrep -f Runner.Worker` prints nothing, then
-   `systemctl stop 'actions.runner.*'`.
+3. Stop the runners one at a time, each when it has no job. Waiting for the
+   whole fleet to be idle at once does not work on a busy day: on 2026-10-04
+   three 12 to 17 minute jobs overlapped for longer than the wait. A stopped
+   runner takes no new job, so this always finishes.
+
+   ```bash
+   systemctl list-units --type=service --state=active --plain --no-legend \
+     'actions.runner.*' | awk '{print $1}' > /root/fleet-units
+   ```
+
+   Keep that list: a glob such as `'actions.runner.*'` only matches units
+   systemd has loaded, so it will not start a runner that is stopped. Then,
+   for each unit in the list, when none of the processes in its control group
+   (`systemctl show <unit> -p ControlGroup --value`, then
+   `/sys/fs/cgroup<that>/cgroup.procs`) is a `Runner.Worker`, run
+   `systemctl stop <unit>`. Repeat until all are stopped.
 4. Immediately before shutting down, repeat the check in step 2 and confirm
    `pgrep -f Runner.Worker` and `pgrep -x 'apt-get|dpkg'` both print nothing.
-   If not, `systemctl start 'actions.runner.*' fleet-idle-update.timer` and
-   start again.
+   If not, `systemctl start $(cat /root/fleet-units) fleet-idle-update.timer`
+   and start again.
 5. In Windows: `wsl --shutdown`, then run the "WSL AutoStart" scheduled task,
    which holds the VM open. The runner services and timers start at boot.
 6. Leave the host alone for five minutes, then check:
@@ -170,6 +184,9 @@ what is in the tmpfs. In WSL, as root:
    `findmnt /tmp` prints nothing.
 
 To go back: `sudo systemctl unmask tmp.mount` and restart the same way.
+
+The fleet host was moved this way on 2026-10-04: `/tmp` went from 1,048,576
+inodes on tmpfs to the root disk's 67 million.
 
 To free space now rather than wait for the timer:
 
