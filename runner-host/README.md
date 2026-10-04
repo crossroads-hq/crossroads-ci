@@ -91,7 +91,12 @@ because a running job may be using it.
 ### /tmp on the root disk
 
 A 4.4 GB tmpfs fills within a day of a few failed runs, faster than a daily
-clean can keep up with. So `install.sh` also masks systemd's `tmp.mount`.
+clean can keep up with. It also runs out of files before it runs out of
+bytes: the tmpfs allows 1,048,576 inodes, and one `evolution-test-pg-*`
+folder holds up to 166,000. On the evening of 2026-10-04, 21 folders, all
+under two hours old, used 755,000 of them with `/tmp` only 51% full, and
+jobs failed with the same `ENOSPC`. So `install.sh` also masks systemd's
+`tmp.mount`.
 From the next WSL restart, `/tmp` is a plain directory on the root disk
 instead of a RAM-backed tmpfs. Until that restart nothing changes: the
 mounted `/tmp` and the jobs using it are left alone, and `install.sh` says
