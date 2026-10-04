@@ -52,8 +52,10 @@ wait_for_updater() {
 # directory, not a mount point, and findmnt without it would report nothing.
 backing_fs() {
   local fs
-  fs="$(findmnt -T "$1" -no SOURCE,FSTYPE,TARGET)" && [ -n "$fs" ] \
-    || { echo "cannot tell which filesystem holds $1" >&2; exit 1; }
+  if ! fs="$(findmnt -T "$1" -no SOURCE,FSTYPE,TARGET)" || [ -z "$fs" ]; then
+    echo "cannot tell which filesystem holds $1" >&2
+    exit 1
+  fi
   printf '%s\n' "$fs"
 }
 
