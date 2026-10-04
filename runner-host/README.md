@@ -77,8 +77,10 @@ use:
 
 - **Recently changed:** if anything inside it changed within `RETAIN_HOURS`
   (24), it stays.
-- **Live Postgres:** a Postgres data directory stays while the process named
-  in its `postmaster.pid` is running, however idle that server is.
+- **Live Postgres:** a Postgres data directory stays while its postmaster is
+  running, however idle that server is. That means the PID in
+  `postmaster.pid` is running *and* has this directory on its command line
+  (`-D <dir>`). A reused PID after a crash doesn't count.
 
 Each run logs how many it removed and kept, and how much space it freed.
 Settings go in `/etc/default/fleet-tmp-clean` (`TMP_DIR`, `PATTERNS`,

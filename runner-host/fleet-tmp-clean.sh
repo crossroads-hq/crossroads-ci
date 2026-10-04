@@ -9,8 +9,9 @@
 # Postgres folders had filled the 4.4 GB tmpfs /tmp to 98%.
 #
 # An entry is removed only when nothing inside it has changed for
-# RETAIN_HOURS, and, for a Postgres data directory, when the process named in
-# its postmaster.pid is no longer running, so a folder in use is never touched.
+# RETAIN_HOURS, and, for a Postgres data directory, when no running process
+# that is its postmaster (the PID in postmaster.pid, with this directory on its
+# command line) remains, so a folder in use is never touched.
 # Installed by install.sh with fleet-tmp-clean.timer (daily).
 set -euo pipefail
 
@@ -27,11 +28,15 @@ removed=0 kept=0 freed_kb=0
 for pattern in $PATTERNS; do
   while IFS= read -r -d '' entry; do
     # A Postgres data directory whose server is still running, however long
-    # it has been idle, is in use.
+    # it has been idle, is in use. A live PID alone is not proof: after a
+    # crash the PID can be reused by any process, which would keep a dead
+    # directory forever. The postmaster is started with -D <this directory>,
+    # so the process must also carry this path on its command line.
     if [ -f "$entry/postmaster.pid" ]; then
       pid="$(head -n1 "$entry/postmaster.pid" 2>/dev/null || true)"
       case "$pid" in ''|*[!0-9]*) ;; *)
-        if kill -0 "$pid" 2>/dev/null; then kept=$((kept + 1)); continue; fi ;;
+        args="$(ps -ww -o args= -p "$pid" 2>/dev/null || true)"
+        case "$args" in *"$entry"*) kept=$((kept + 1)); continue ;; esac ;;
       esac
     fi
     # Anything inside changed recently (or unreadable): a job may still own it.
