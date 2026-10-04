@@ -51,10 +51,11 @@ daily `systemd-tmpfiles-clean.timer`. The runners never prune `_diag`
 themselves: 8,201 files and 2.1 GB on 2026-10-01. The runners' `blocks/` and
 `pages/` caches are excluded.
 
-It also installs `fleet-tmp-clean.timer` (see below).
+It also installs `fleet-tmp-clean.timer` and masks `tmp.mount` (see below).
 
-`sudo runner-host/install.sh --uninstall` removes it and restores Ubuntu's
-timers. It waits for an update already in progress rather than killing apt.
+`sudo runner-host/install.sh --uninstall` removes it, restores Ubuntu's
+timers and unmasks `tmp.mount`. It waits for an update already in progress
+rather than killing apt.
 
 ## Stale scratch folders in /tmp
 
@@ -87,17 +88,76 @@ Settings go in `/etc/default/fleet-tmp-clean` (`TMP_DIR`, `PATTERNS`,
 `RETAIN_HOURS`). The shared npm cache in the runner user's home is left alone,
 because a running job may be using it.
 
-**While `/tmp` is a 4.4 GB tmpfs, 24 hours and once a day is too slow:** a
-few failed runs fill it within a day. Either:
+### /tmp on the root disk
 
-- **move `/tmp` onto the root disk**, the lasting fix. When no runner is
-  busy, run `sudo systemctl mask tmp.mount` in WSL, then `wsl --shutdown` in
-  Windows and reopen Ubuntu; `df -h /tmp` should then show the root disk, not
-  `tmpfs`; or
-- **clean more often:** set `RETAIN_HOURS=6` in
-  `/etc/default/fleet-tmp-clean`, and run the timer every 6 hours with
-  `sudo systemctl edit fleet-tmp-clean.timer`, adding
-  `[Timer]`, `OnCalendar=`, `OnCalendar=*-*-* 00/6:00:00`.
+A 4.4 GB tmpfs fills within a day of a few failed runs, faster than a daily
+clean can keep up with. So `install.sh` also masks systemd's `tmp.mount`.
+From the next WSL restart, `/tmp` is a plain directory on the root disk
+instead of a RAM-backed tmpfs. Until that restart nothing changes: the
+mounted `/tmp` and the jobs using it are left alone, and `install.sh` says
+which of the two states the host is in.
+
+**How much room that is.** Inside WSL the root disk reports 1007 GB, but it
+is a virtual disk: one file, `ext4.vhdx`, on the Windows `C:` volume. On
+2026-10-04 that file was 75 GB, fully allocated and not sparse, and `C:` had
+83 GB free of 237 GB. So `/tmp` can grow by about 83 GB, not 900 GB, and
+filling `C:` stalls the whole VM and Windows with it. Both cleaners stay for
+that reason. To read the real numbers, in PowerShell on the Windows side:
+
+```powershell
+Get-Volume C
+Get-ChildItem "$env:LOCALAPPDATA\wsl" -Recurse -Filter ext4.vhdx
+```
+
+Whether deleting files in Linux gives the space back to `C:` is
+**unverified**. The disk is not sparse (`sparseVhd=true` in `.wslconfig`
+applies only to disks created after it was set), so assume growth is one-way
+until it is tested or the disk is compacted.
+
+**What cleans it.** A disk-backed `/tmp` no longer empties at restart.
+
+- `fleet-tmp-clean` removes the known large folders after 24 hours, as above.
+- Ubuntu's own rule (`q /tmp 1777 root root 10d` in
+  `/usr/lib/tmpfiles.d/tmp.conf`, run daily by
+  `systemd-tmpfiles-clean.timer`) cleans eligible inactive entries under a
+  10-day policy. It weighs access, modification and change times, and skips
+  excluded or locked entries, so it is not a deadline counted from creation.
+
+**Restarting WSL to apply it.** This takes every runner offline and discards
+what is in the tmpfs. In WSL, as root:
+
+1. Stop new update runs: `systemctl stop fleet-idle-update.timer`.
+2. Wait for a running update to end. The update service pauses the runners
+   itself while apt runs and restarts them when it exits, so "no job is
+   running" does not prove the host is idle. It is a oneshot service, shown
+   as `activating`, never `active`, while it runs. Go on only when
+
+   ```bash
+   systemctl show fleet-idle-update.service -p ActiveState -p MainPID -p Job
+   ```
+
+   prints `ActiveState=inactive`, `MainPID=0` and an empty `Job=`. On
+   `activating`, `deactivating` or a job number, wait. On anything else, or
+   if the command fails, start the timer again and find out why first.
+3. Wait until `pgrep -f Runner.Worker` prints nothing, then
+   `systemctl stop 'actions.runner.*'`.
+4. Immediately before shutting down, repeat the check in step 2 and confirm
+   `pgrep -f Runner.Worker` and `pgrep -x 'apt-get|dpkg'` both print nothing.
+   If not, `systemctl start 'actions.runner.*' fleet-idle-update.timer` and
+   start again.
+5. In Windows: `wsl --shutdown`, then run the "WSL AutoStart" scheduled task,
+   which holds the VM open. The runner services and timers start at boot.
+6. Leave the host alone for five minutes, then check:
+
+   ```bash
+   findmnt -T /tmp -no SOURCE,FSTYPE,TARGET
+   findmnt -T / -no SOURCE,FSTYPE,TARGET
+   ```
+
+   The two lines must match. `-T` matters: once `/tmp` is a plain directory,
+   `findmnt /tmp` prints nothing.
+
+To go back: `sudo systemctl unmask tmp.mount` and restart the same way.
 
 To free space now rather than wait for the timer:
 

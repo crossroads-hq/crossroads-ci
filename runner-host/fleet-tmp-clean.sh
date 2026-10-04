@@ -6,7 +6,9 @@
 # evolution-a11y-pg-* (66-127 MB each). A job that dies (out of disk,
 # cancelled, timed out) never removes its own, so they pile up until /tmp
 # fills and every job on the host fails with ENOSPC. On 2026-10-04, 73
-# Postgres folders had filled the 4.4 GB tmpfs /tmp to 98%.
+# Postgres folders had filled the 4.4 GB tmpfs /tmp to 98%. install.sh now
+# makes /tmp disk-backed from the next WSL restart; the folders still pile up
+# there, only with more room.
 #
 # An entry is removed only when nothing inside it has changed for
 # RETAIN_HOURS, and, for a Postgres data directory, when no running process
