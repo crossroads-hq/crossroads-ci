@@ -122,9 +122,13 @@ after it was set), so the file only grows. Tested 2026-10-04: with Linux using
 deletion and `fstrim` (which trimmed 925 GiB on its first run), and `C:` free
 space did not move. The 20 GB between what Linux uses and the file's size is
 room already taken from `C:`: new scratch data fills that first, and only
-then does the file grow. Getting space back needs the disk compacted or made
-sparse (`wsl --manage Ubuntu --set-sparse true`) with WSL shut down, which
-has not been done.
+then does the file grow. Getting space back needs the disk compacted with
+WSL shut down, which has not been done. Do not reach for
+`wsl --manage Ubuntu --set-sparse true`: recent WSL releases refuse it
+because of a data-corruption risk unless forced with `--allow-unsafe`
+([microsoft/WSL#13075](https://github.com/microsoft/WSL/issues/13075)).
+WSL's source has a one-time `wsl --manage <distro> --compact`, but the help
+of the host's WSL 2.7.12 does not list it, so check `wsl --help` first.
 
 **What cleans it.** A disk-backed `/tmp` no longer empties at restart.
 
@@ -176,10 +180,25 @@ what is in the tmpfs. In WSL, as root:
    (`systemctl show <unit> -p ControlGroup --value`, then
    `/sys/fs/cgroup<that>/cgroup.procs`) is a `Runner.Worker`, run
    `systemctl stop <unit>`. Repeat until all are stopped.
-4. Immediately before shutting down, repeat the check in step 2 and confirm
-   `pgrep -f Runner.Worker` and `pgrep -x 'apt-get|dpkg'` both print nothing,
-   and that `systemctl list-units --state=active 'actions.runner.*'` lists no
-   runner. If not,
+4. Immediately before shutting down, repeat the check in step 2, then run
+   this. An empty answer is not enough: `pgrep` exits 1 for "nothing
+   matched" and 2 or 3 when it could not look, and a failed `systemctl` also
+   prints nothing.
+
+   ```bash
+   ok=yes
+   pgrep -f Runner.Worker >/dev/null; [ $? -eq 1 ] || ok=no
+   pgrep -x 'apt-get|dpkg' >/dev/null; [ $? -eq 1 ] || ok=no
+   if left="$(systemctl list-units --type=service --state=active \
+        --plain --no-legend 'actions.runner.*')"; then
+     [ -z "$left" ] || ok=no
+   else
+     ok=no
+   fi
+   echo "safe to shut down: $ok"
+   ```
+
+   Shut down only on `yes`. On `no`,
    `systemctl start $(cat /root/fleet-units) fleet-idle-update.timer`
    and start again.
 5. In Windows: `wsl --shutdown`, then run the "WSL AutoStart" scheduled task,
