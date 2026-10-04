@@ -51,8 +51,37 @@ daily `systemd-tmpfiles-clean.timer`. The runners never prune `_diag`
 themselves: 8,201 files and 2.1 GB on 2026-10-01. The runners' `blocks/` and
 `pages/` caches are excluded.
 
+It also installs `fleet-tmp-clean.timer` (see below).
+
 `sudo runner-host/install.sh --uninstall` removes it and restores Ubuntu's
 timers. It waits for an update already in progress rather than killing apt.
+
+## Stale scratch folders in /tmp
+
+CI jobs create scratch folders in `/tmp`, such as `crossroads-export-install-*`
+or `crossroads-dt1-react18-*`. Some hold a complete npm cache. A job that dies
+(out of disk, cancelled, timed out) never removes its own. On 2026-10-03 they
+filled the host, and every job on every runner failed with `ENOSPC: no space
+left on device`.
+
+`fleet-tmp-clean` runs once a day (`fleet-tmp-clean.timer`, plus 20 minutes
+after boot). It removes top-level entries in `/tmp` matching `crossroads-*`
+only when nothing inside them has changed for 24 hours (`RETAIN_HOURS`). A
+folder a job is still writing to is never touched. It logs how many it removed
+and kept, and how much space it freed. Settings go in
+`/etc/default/fleet-tmp-clean` (`TMP_DIR`, `PATTERNS`, `RETAIN_HOURS`). It
+leaves the shared npm cache in the runner user's home alone, because a running
+job may be using it.
+
+To free space now rather than wait for the timer:
+
+```bash
+sudo systemctl start fleet-tmp-clean.service
+journalctl -u fleet-tmp-clean -n 5
+```
+
+`node --test runner-host/tmp-clean.test.js` runs the script against a scratch
+directory with backdated files. CI runs it with the other runner-host tests.
 
 ### Watch it
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Remove stale CI scratch folders from /tmp on the runner host
+Documentation=https://github.com/crossroads-hq/crossroads-ci/tree/main/runner-host
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/fleet-tmp-clean
+ExecStart=/usr/local/sbin/fleet-tmp-clean
+# Lower than the CI jobs it shares the disk with.
+Nice=10
+IOSchedulingClass=idle
