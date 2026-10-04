@@ -157,9 +157,18 @@ what is in the tmpfs. In WSL, as root:
    runner takes no new job, so this always finishes.
 
    ```bash
-   systemctl list-units --type=service --state=active --plain --no-legend \
-     'actions.runner.*' | awk '{print $1}' > /root/fleet-units
+   if listing="$(systemctl list-units --type=service --state=active \
+        --plain --no-legend 'actions.runner.*')" && [ -n "$listing" ]; then
+     awk '{print $1}' <<<"$listing" > /root/fleet-units
+     cat /root/fleet-units
+   else
+     echo "could not list the runner units: stop here" >&2
+   fi
    ```
+
+   Go on only if it printed every runner you expect (four on the fleet host
+   today). A failed or short listing would leave a runner out of the list,
+   still running and free to take a job during the shutdown.
 
    Keep that list: a glob such as `'actions.runner.*'` only matches units
    systemd has loaded, so it will not start a runner that is stopped. Then,
@@ -168,8 +177,10 @@ what is in the tmpfs. In WSL, as root:
    `/sys/fs/cgroup<that>/cgroup.procs`) is a `Runner.Worker`, run
    `systemctl stop <unit>`. Repeat until all are stopped.
 4. Immediately before shutting down, repeat the check in step 2 and confirm
-   `pgrep -f Runner.Worker` and `pgrep -x 'apt-get|dpkg'` both print nothing.
-   If not, `systemctl start $(cat /root/fleet-units) fleet-idle-update.timer`
+   `pgrep -f Runner.Worker` and `pgrep -x 'apt-get|dpkg'` both print nothing,
+   and that `systemctl list-units --state=active 'actions.runner.*'` lists no
+   runner. If not,
+   `systemctl start $(cat /root/fleet-units) fleet-idle-update.timer`
    and start again.
 5. In Windows: `wsl --shutdown`, then run the "WSL AutoStart" scheduled task,
    which holds the VM open. The runner services and timers start at boot.
