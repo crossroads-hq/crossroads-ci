@@ -8,7 +8,8 @@
 #
 # Installing masks apt-daily.timer and apt-daily-upgrade.timer, whose
 # unscheduled runs hold the dpkg lock under CI jobs (crossroads-ci#50), and
-# replaces them with fleet-idle-update.timer.
+# replaces them with fleet-idle-update.timer. It also installs
+# fleet-tmp-clean.timer, which removes stale CI scratch folders from /tmp daily.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -22,7 +23,7 @@ diag_rule=/etc/tmpfiles.d/fleet-runner-diag.conf
 DIAG_RETAIN_DAYS="${DIAG_RETAIN_DAYS:-14}"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  systemctl disable --now fleet-idle-update.timer 2>/dev/null || true
+  systemctl disable --now fleet-idle-update.timer fleet-tmp-clean.timer 2>/dev/null || true
   # Disabling the timer does not end a run already in progress. Wait for it
   # rather than stop it: killing apt mid-upgrade can leave dpkg half-configured.
   while systemctl is-active --quiet fleet-idle-update.service; do
@@ -31,7 +32,10 @@ if [ "${1:-}" = "--uninstall" ]; then
   done
   rm -f /etc/systemd/system/fleet-idle-update.service \
         /etc/systemd/system/fleet-idle-update.timer \
-        /usr/local/sbin/fleet-idle-update "$no_periodic" "$diag_rule"
+        /usr/local/sbin/fleet-idle-update "$no_periodic" "$diag_rule" \
+        /etc/systemd/system/fleet-tmp-clean.service \
+        /etc/systemd/system/fleet-tmp-clean.timer \
+        /usr/local/sbin/fleet-tmp-clean
   systemctl unmask "${apt_timers[@]}"
   systemctl daemon-reload
   systemctl enable --now "${apt_timers[@]}"
@@ -41,6 +45,10 @@ fi
 
 install -m 0755 "$here/fleet-idle-update.sh" /usr/local/sbin/fleet-idle-update
 install -m 0644 "$here/fleet-idle-update.service" "$here/fleet-idle-update.timer" /etc/systemd/system/
+# Failed and cancelled jobs leave scratch folders (some with a whole npm cache)
+# in /tmp; on 2026-10-03 they filled the host and every job failed with ENOSPC.
+install -m 0755 "$here/fleet-tmp-clean.sh" /usr/local/sbin/fleet-tmp-clean
+install -m 0644 "$here/fleet-tmp-clean.service" "$here/fleet-tmp-clean.timer" /etc/systemd/system/
 [ -e /etc/default/fleet-idle-update ] || install -m 0644 "$here/fleet-idle-update.default" /etc/default/fleet-idle-update
 
 # Belt and braces: the masked timers are the trigger, these settings are what
@@ -65,7 +73,7 @@ CONF
 systemctl disable --now "${apt_timers[@]}" 2>/dev/null || true
 systemctl mask "${apt_timers[@]}"
 systemctl daemon-reload
-systemctl enable --now fleet-idle-update.timer
+systemctl enable --now fleet-idle-update.timer fleet-tmp-clean.timer
 
 echo "installed."
-systemctl list-timers --no-pager --all 'fleet-idle-update*' '*apt*'
+systemctl list-timers --no-pager --all 'fleet-idle-update*' 'fleet-tmp-clean*' '*apt*'
