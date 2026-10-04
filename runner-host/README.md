@@ -105,7 +105,8 @@ which of the two states the host is in.
 **How much room that is.** Inside WSL the root disk reports 1007 GB, but it
 is a virtual disk: one file, `ext4.vhdx`, on the Windows `C:` volume. On
 2026-10-04 that file was 75 GB, fully allocated and not sparse, and `C:` had
-83 GB free of 237 GB. So `/tmp` can grow by about 83 GB, not 900 GB, and
+83 GB free of 237 GB. So `/tmp` can grow by about 100 GB (20 GB of slack
+inside the file, then the 83 GB), not 900 GB, and
 filling `C:` stalls the whole VM and Windows with it. Both cleaners stay for
 that reason. To read the real numbers, in PowerShell on the Windows side:
 
@@ -114,10 +115,16 @@ Get-Volume C
 Get-ChildItem "$env:LOCALAPPDATA\wsl" -Recurse -Filter ext4.vhdx
 ```
 
-Whether deleting files in Linux gives the space back to `C:` is
-**unverified**. The disk is not sparse (`sparseVhd=true` in `.wslconfig`
-applies only to disks created after it was set), so assume growth is one-way
-until it is tested or the disk is compacted.
+Deleting files in Linux does **not** give the space back to `C:`. The disk
+is not sparse (`sparseVhd=true` in `.wslconfig` applies only to disks created
+after it was set), so the file only grows. Tested 2026-10-04: with Linux using
+55 GB, the file stayed at 74.975 GB allocated through a 2 GB write, its
+deletion and `fstrim` (which trimmed 925 GiB on its first run), and `C:` free
+space did not move. The 20 GB between what Linux uses and the file's size is
+room already taken from `C:`: new scratch data fills that first, and only
+then does the file grow. Getting space back needs the disk compacted or made
+sparse (`wsl --manage Ubuntu --set-sparse true`) with WSL shut down, which
+has not been done.
 
 **What cleans it.** A disk-backed `/tmp` no longer empties at restart.
 
