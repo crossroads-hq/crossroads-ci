@@ -91,3 +91,58 @@ test("rejects a bad RETAIN_HOURS and a missing directory", () => {
   assert.strictEqual(s.run({ RETAIN_HOURS: "1d" }).code, 2);
   assert.strictEqual(s.run({ TMP_DIR: path.join(s.tmp, "missing") }).code, 2);
 });
+
+test("removes stale evolution embedded-Postgres folders by default", () => {
+  const s = scratch();
+  s.file("evolution-test-pg-AbC123/base/1/1259", 48);
+  for (const d of ["evolution-test-pg-AbC123/base/1", "evolution-test-pg-AbC123/base", "evolution-test-pg-AbC123"]) s.age(d, 48);
+  s.file("evolution-a11y-pg-Xy9/PG_VERSION", 48);
+  s.age("evolution-a11y-pg-Xy9", 48);
+  s.file("evolution-notes/keep", 48);
+  s.age("evolution-notes", 48);
+  const r = s.run();
+  assert.strictEqual(r.code, 0, r.out);
+  assert.ok(!s.exists("evolution-test-pg-AbC123"), r.out);
+  assert.ok(!s.exists("evolution-a11y-pg-Xy9"), r.out);
+  assert.ok(s.exists("evolution-notes"), "only *-pg-* folders, not every evolution-* name");
+});
+
+test("keeps a Postgres folder whose server is still running, however idle", async () => {
+  const s = scratch();
+  const dir = path.join(s.tmp, "evolution-test-pg-live");
+  s.file("evolution-test-pg-live/PG_VERSION", 48);
+  // A stand-in postmaster: a live process with this directory on its command
+  // line, as Postgres has with -D <dir>.
+  const { spawn } = require("node:child_process");
+  const postmaster = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "--", "-D", dir], { stdio: "ignore" });
+  try {
+    fs.writeFileSync(path.join(dir, "postmaster.pid"), `${postmaster.pid}\n${dir}\n`);
+    const t = now() - 48 * HOUR;
+    fs.utimesSync(path.join(dir, "postmaster.pid"), t, t);
+    s.age("evolution-test-pg-live", 48);
+    // A dead one: a PID that cannot be running.
+    s.file("evolution-test-pg-dead/postmaster.pid", 48);
+    fs.writeFileSync(path.join(s.tmp, "evolution-test-pg-dead/postmaster.pid"), "2147483646\n");
+    fs.utimesSync(path.join(s.tmp, "evolution-test-pg-dead/postmaster.pid"), t, t);
+    s.age("evolution-test-pg-dead", 48);
+    const r = s.run();
+    assert.strictEqual(r.code, 0, r.out);
+    assert.ok(s.exists("evolution-test-pg-live"), r.out);
+    assert.ok(!s.exists("evolution-test-pg-dead"), r.out);
+  } finally {
+    postmaster.kill();
+  }
+});
+
+test("removes a Postgres folder whose PID was reused by an unrelated process", () => {
+  const s = scratch();
+  // This test's own process is alive but is not this directory's postmaster.
+  s.file("evolution-test-pg-reused/postmaster.pid", 48);
+  fs.writeFileSync(path.join(s.tmp, "evolution-test-pg-reused/postmaster.pid"), `${process.pid}\n`);
+  const t = now() - 48 * HOUR;
+  fs.utimesSync(path.join(s.tmp, "evolution-test-pg-reused/postmaster.pid"), t, t);
+  s.age("evolution-test-pg-reused", 48);
+  const r = s.run();
+  assert.strictEqual(r.code, 0, r.out);
+  assert.ok(!s.exists("evolution-test-pg-reused"), r.out);
+});

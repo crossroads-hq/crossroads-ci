@@ -58,20 +58,46 @@ timers. It waits for an update already in progress rather than killing apt.
 
 ## Stale scratch folders in /tmp
 
-CI jobs create scratch folders in `/tmp`, such as `crossroads-export-install-*`
-or `crossroads-dt1-react18-*`. Some hold a complete npm cache. A job that dies
-(out of disk, cancelled, timed out) never removes its own. On 2026-10-03 they
-filled the host, and every job on every runner failed with `ENOSPC: no space
-left on device`.
+CI jobs create scratch folders in `/tmp` and never remove them when a job
+dies (out of disk, cancelled, timed out):
+
+- **crossroads-ui:** `crossroads-*`, for example `crossroads-export-install-*`
+  or `crossroads-dt1-react18-*`. Some hold a whole npm cache.
+- **crossroads-evolution:** embedded-Postgres data directories,
+  `evolution-test-pg-*` and `evolution-a11y-pg-*`, 66–127 MB each.
+
+On 2026-10-04, 73 leftover Postgres folders filled `/tmp` to 98%. That
+`/tmp` is a 4.4 GB tmpfs (RAM-backed), separate from the 1 TB root disk.
+Every job on every runner then failed with `ENOSPC: no space left on device`.
 
 `fleet-tmp-clean` runs once a day (`fleet-tmp-clean.timer`, plus 20 minutes
-after boot). It removes top-level entries in `/tmp` matching `crossroads-*`
-only when nothing inside them has changed for 24 hours (`RETAIN_HOURS`). A
-folder a job is still writing to is never touched. It logs how many it removed
-and kept, and how much space it freed. Settings go in
-`/etc/default/fleet-tmp-clean` (`TMP_DIR`, `PATTERNS`, `RETAIN_HOURS`). It
-leaves the shared npm cache in the runner user's home alone, because a running
-job may be using it.
+after boot). It removes top-level entries in `/tmp` matching
+`crossroads-* evolution-*-pg-*` (`PATTERNS`). It never removes a folder in
+use:
+
+- **Recently changed:** if anything inside it changed within `RETAIN_HOURS`
+  (24), it stays.
+- **Live Postgres:** a Postgres data directory stays while its postmaster is
+  running, however idle that server is. That means the PID in
+  `postmaster.pid` is running *and* has this directory on its command line
+  (`-D <dir>`). A reused PID after a crash doesn't count.
+
+Each run logs how many it removed and kept, and how much space it freed.
+Settings go in `/etc/default/fleet-tmp-clean` (`TMP_DIR`, `PATTERNS`,
+`RETAIN_HOURS`). The shared npm cache in the runner user's home is left alone,
+because a running job may be using it.
+
+**While `/tmp` is a 4.4 GB tmpfs, 24 hours and once a day is too slow:** a
+few failed runs fill it within a day. Either:
+
+- **move `/tmp` onto the root disk**, the lasting fix. When no runner is
+  busy, run `sudo systemctl mask tmp.mount` in WSL, then `wsl --shutdown` in
+  Windows and reopen Ubuntu; `df -h /tmp` should then show the root disk, not
+  `tmpfs`; or
+- **clean more often:** set `RETAIN_HOURS=6` in
+  `/etc/default/fleet-tmp-clean`, and run the timer every 6 hours with
+  `sudo systemctl edit fleet-tmp-clean.timer`, adding
+  `[Timer]`, `OnCalendar=`, `OnCalendar=*-*-* 00/6:00:00`.
 
 To free space now rather than wait for the timer:
 
