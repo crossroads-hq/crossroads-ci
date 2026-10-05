@@ -25,7 +25,7 @@ on:
           because a hosted job on a private repository spends paid Actions
           minutes, each job rounded up to a whole minute.
 
-          The target must be Linux on x86-64: all three tools are fetched as
+          The target must be Linux on x86-64: the lint tools are fetched as
           pinned `linux` x86-64 binaries and verified with `sha256sum`. Name
           `Linux` and `X64` in the labels, since `fast` and `light` alone also
           match the macOS runners. Docker and pipx are NOT required.
@@ -49,13 +49,17 @@ jobs:
 
       # Pinned release binaries, verified by checksum, rather than the
       # actionlint Docker image and `pipx run`: the self-hosted fleet has
-      # neither a Docker daemon nor pipx. shellcheck is fetched too because
-      # actionlint checks `run:` scripts with whatever shellcheck is on PATH,
-      # and silently skips that check when there is none -- the Docker image
-      # bundled it, so dropping it would weaken the lint without a sound.
-      # Checksums are the publishers' own: actionlint's checksums.txt, and
-      # GitHub's release-asset digest for shellcheck and zizmor.
-      - name: Install actionlint, shellcheck and zizmor
+      # neither a Docker daemon nor pipx. shellcheck and pyflakes come too
+      # because actionlint checks `run:` scripts (`shell: bash` and
+      # `shell: python`) with whatever of them is on PATH, and silently skips
+      # a check when its tool is missing -- the Docker image bundled both, so
+      # dropping them would weaken the lint without a sound. pyflakes is pure
+      # Python, so it runs from its pinned wheel through a two-line wrapper:
+      # no pip, no venv, only the runner's python3.
+      # Checksums are the publishers' own: actionlint's checksums.txt,
+      # GitHub's release-asset digest for shellcheck and zizmor, and PyPI's
+      # for the pyflakes wheel.
+      - name: Install actionlint, shellcheck, pyflakes and zizmor
         env:
           ACTIONLINT_VERSION: 1.7.12
           ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
@@ -63,6 +67,8 @@ jobs:
           SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
           ZIZMOR_VERSION: 1.11.0
           ZIZMOR_SHA256: da35e666827cbb1e6ca98b18b7969657b9f186467bfebfa25e730aac527c36f8
+          PYFLAKES_WHEEL: https://files.pythonhosted.org/packages/b6/a8/7df0a3b4f8166c2fb7fe0195f88a0a643cfb7cd1b0430c19f74bd01771f5/pyflakes-4.0.2-py2.py3-none-any.whl
+          PYFLAKES_SHA256: 01faee1160feadfd9d58c9631a895126ba2032c2e8748e32a96ab51cbd084c6d
         run: |
           set -euo pipefail
           bin="${RUNNER_TEMP}/workflow-lint-bin"
@@ -74,14 +80,18 @@ jobs:
             "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
           curl -sSfL --retry 3 -o zizmor.tar.gz \
             "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL --retry 3 -o "$bin/pyflakes.whl" "$PYFLAKES_WHEEL"
           sha256sum -c - <<SUMS
           ${ACTIONLINT_SHA256}  actionlint.tar.gz
           ${SHELLCHECK_SHA256}  shellcheck.tar.gz
           ${ZIZMOR_SHA256}  zizmor.tar.gz
+          ${PYFLAKES_SHA256}  ${bin}/pyflakes.whl
           SUMS
           tar -xzf actionlint.tar.gz -C "$bin" actionlint
           tar -xzf shellcheck.tar.gz -C "$bin" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           tar -xzf zizmor.tar.gz -C "$bin" ./zizmor
+          printf '#!/bin/sh\nPYTHONPATH="%s" exec python3 -m pyflakes "$@"\n' "$bin/pyflakes.whl" > "$bin/pyflakes"
+          chmod +x "$bin/pyflakes"
           echo "$bin" >> "$GITHUB_PATH"
 
       - name: Run actionlint
