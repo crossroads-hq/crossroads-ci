@@ -81,7 +81,7 @@ normalise_runs_on() {
     /^[[:space:]]*runs-on:[[:space:]]*\[/ { print; next }
     /^[[:space:]]*runs-on:[[:space:]]*$/   { collecting=1; n=0; next }
     collecting && /^[[:space:]]*-[[:space:]]*/ {
-      item=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",item); gsub(/[\"'"'"']/,"",item)
+      item=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",item); gsub(/["'"'"']/,"",item)
       items[n++]=item; next
     }
     collecting {
@@ -165,7 +165,11 @@ while IFS= read -r _r; do
   if grep -qxF "$_r" <<<"$org_all"; then
     fail "\`$_r\` is on the reviewed list but ARCHIVED. Archiving supersedes any ruleset; unarchive before governing it, or remove the entry."
   else
-    fail "\`$_r\` is on the reviewed list but \`$ORG\` has no such repository. Every per-repository check keys on gh's exit status, and a 404 for a name that does not exist is indistinguishable from \"nothing to check here\" -- verify-pins.sh reports such an entry as \"no workflows (minimal: expected)\" and exits 0."
+    # The org listing holds only what this token can see, so absence from it
+    # means "missing OR invisible", never "missing" alone: a repository-scoped
+    # GITHUB_TOKEN lists the public repositories only, and once reported every
+    # private one as nonexistent.
+    fail "\`$_r\` is on the reviewed list but no repository by that name in \`$ORG\` is visible to this token: either it does not exist, or it is private and the token cannot read it. Every per-repository check keys on gh's exit status, and a 404 for a name that does not exist is indistinguishable from \"nothing to check here\" -- verify-pins.sh reports such an entry as \"no workflows (minimal: expected)\" and exits 0."
   fi
 done <<<"$roster_names"
 
@@ -237,7 +241,14 @@ for r in "${repos[@]}"; do
     # Not `.[$s] // "unset"`: jq's `//` treats false as absent, so it would
     # report a setting that is plainly off as missing.
     value="$(jq -r --arg s "$setting" 'if has($s) then .[$s] | tostring else "unset" end' <<<"$meta")"
-    [ "$value" = "true" ] || fail "\`$r\` has \`$setting=$value\`; the policy's repository_settings require \`true\` on gate-enabled repositories."
+    # GitHub omits these fields for a token without admin read on the
+    # repository, so "unset" is unknown, not off: still a failure, but named
+    # as what it is.
+    if [ "$value" = "unset" ]; then
+      fail "\`$r\` did not return \`$setting\`; GitHub omits it when the token lacks admin read on the repository, so it could not be verified."
+    elif [ "$value" != "true" ]; then
+      fail "\`$r\` has \`$setting=$value\`; the policy's repository_settings require \`true\` on gate-enabled repositories."
+    fi
   done
 done
 
