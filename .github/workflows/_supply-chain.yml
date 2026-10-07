@@ -45,7 +45,7 @@ on:
       runner-labels:
         description: >-
           JSON array of `runs-on` labels for all three jobs, e.g.
-          `["self-hosted","fast"]`. A JSON string rather than a plain label
+          `["self-hosted","Linux","X64","fast"]`. A JSON string rather than a plain label
           because `runs-on` needs a LIST for a self-hosted target and Actions
           gives an input no list type.
 
@@ -68,10 +68,15 @@ on:
           point -- which is exactly why the constraint lands on this input
           instead.
 
-          One further requirement on the target, not checked here: Linux on
-          x86-64. Both scanners are fetched as pinned binaries -- gitleaks
-          as a `linux_x64` tarball, osv-scanner as a `linux_amd64`
-          executable -- and both verify with `sha256sum`.
+          One further requirement on the target: Linux on x86-64. Both
+          scanners are fetched as pinned binaries -- gitleaks as a
+          `linux_x64` tarball, osv-scanner as a `linux_amd64` executable --
+          and both verify with `sha256sum`. Name `Linux` and `X64` in the
+          labels, as _workflow-lint.yml asks: `fast` alone also matches the
+          macOS runners. On 2026-10-05 a crossroads-ui pull request's scans
+          landed on mac-fleet-1 and both failed with exit 126 ("cannot
+          execute binary file"), failing its gate for no reason in the diff.
+          Each scanner step now checks the platform first and says so.
 
           Docker is NOT required. It was, while the lockfile job ran
           osv-scanner-action, a container action; that was the one thing
@@ -149,6 +154,10 @@ jobs:
           OSV_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
         run: |
           set -euo pipefail
+          if [ "${RUNNER_OS}/${RUNNER_ARCH}" != "Linux/X64" ]; then
+            echo "::error::osv-scanner is pinned as a Linux x86-64 binary, but this runner is ${RUNNER_OS}/${RUNNER_ARCH}. Name Linux and X64 in runner-labels; a capability label such as fast also matches the macOS runners."
+            exit 1
+          fi
           curl -sSfL --retry 3 -o "${RUNNER_TEMP}/osv-scanner" \
             "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
           echo "${OSV_SHA256}  ${RUNNER_TEMP}/osv-scanner" | sha256sum -c -
@@ -224,6 +233,10 @@ jobs:
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
         run: |
           set -euo pipefail
+          if [ "${RUNNER_OS}/${RUNNER_ARCH}" != "Linux/X64" ]; then
+            echo "::error::gitleaks is pinned as a Linux x86-64 binary, but this runner is ${RUNNER_OS}/${RUNNER_ARCH}. Name Linux and X64 in runner-labels; a capability label such as fast also matches the macOS runners."
+            exit 1
+          fi
           curl -sSfL --retry 3 -o "${RUNNER_TEMP}/gitleaks.tar.gz" \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           (cd "${RUNNER_TEMP}" \
