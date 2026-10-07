@@ -62,7 +62,10 @@ last_job_activity() {
     [ -d "$dir" ] || continue
     # shellcheck disable=SC2012 # ls -t is the portable mtime sort
     listing="$(ls -1t "$dir")" || return 1
-    name="$(printf '%s\n' "$listing" | grep -m1 '^Worker_.*\.log$' || true)"
+    # A here-string, not `printf | grep -m1`: grep exits at the first match,
+    # and under systemd (IgnoreSIGPIPE=yes) printf then logged "write error:
+    # Broken pipe" on every idle poll instead of dying quietly.
+    name="$(grep -m1 '^Worker_.*\.log$' <<<"$listing" || true)"
     [ -n "$name" ] || continue
     m="$(mtime "$dir/$name")" || return 1
     if [ "$m" -gt "$newest" ]; then newest="$m"; fi

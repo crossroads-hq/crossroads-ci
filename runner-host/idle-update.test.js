@@ -38,10 +38,13 @@ function host({ aptFails = false, listFails = false, aptMinutes = 0 } = {}) {
   stub("busy", `line="$(head -n1 "${queue}")"; tail -n +2 "${queue}" > "${queue}.t"; mv "${queue}.t" "${queue}"; [ "$line" = lockdiag ] && chmod 000 "${diag}"; [ "$line" = busy ]`);
   const state = path.join(dir, "state");
 
-  const run = (now, busy = []) => {
+  const run = (now, busy = [], { ignoreSigpipe = false } = {}) => {
     fs.writeFileSync(clock, String(now));
     fs.writeFileSync(queue, busy.join("\n") + (busy.length ? "\n" : ""));
-    const r = spawnSync("bash", [SCRIPT], {
+    // systemd runs services with IgnoreSIGPIPE=yes; `trap '' PIPE` before
+    // exec reproduces that, since an ignored signal survives exec.
+    const argv = ignoreSigpipe ? ["-c", `trap '' PIPE; exec bash "${SCRIPT}"`] : [SCRIPT];
+    const r = spawnSync("bash", argv, {
       encoding: "utf8",
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
@@ -247,4 +250,18 @@ test("an unreadable job-log folder at the final pre-stop check still stops the r
   } finally {
     fs.chmodSync(path.join(h.dir, "diag"), 0o755);
   }
+});
+
+test("scanning a large job-log folder under systemd writes nothing to stderr", () => {
+  // On the host, `printf "$listing" | grep -m1` logged "printf: write error:
+  // Broken pipe" on every idle poll: grep exits at the first match while
+  // printf is still writing thousands of lines.
+  const h = host();
+  for (let i = 0; i < 5000; i++) {
+    fs.writeFileSync(path.join(h.dir, "diag", `Worker_${String(i).padStart(5, "0")}.log`), "");
+  }
+  h.run(T0, [], { ignoreSigpipe: true });
+  const r = h.run(T0 + 10 * MIN, [], { ignoreSigpipe: true });
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(r.out, /Broken pipe|write error/);
 });
