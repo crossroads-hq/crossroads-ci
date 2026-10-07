@@ -35,36 +35,64 @@ jobs:
         with:
           persist-credentials: false
 
-      # FLEET_AUDIT_TOKEN is required; there is no GITHUB_TOKEN fallback.
-      # That fallback was meant to degrade to "a few checks skipped". What it
-      # did was worse: GITHUB_TOKEN is scoped to this repository, so the org
-      # listing returned only the public repositories, and every private one
-      # was reported as a MUST FIX "no such repository" -- along with merge
-      # settings the token could not read, reported as "unset". Every
-      # scheduled run from 2026-09-07 to 2026-10-05 failed on those findings
-      # alone (8 private repositories, 3 of 11 audited), while the same
-      # script run with an owner token found no drift. A red run that is
-      # always red for the wrong reason is how an audit stops being read.
-      # README "Fleet drift audit" lists the token's permissions.
-      - name: Check the audit token is configured
+      # The audit reads as a GitHub App, not a personal token (crossroads-os
+      # ADR-0005 rule 4), and there is no GITHUB_TOKEN fallback. That fallback
+      # was meant to degrade to "a few checks skipped". What it did was worse:
+      # GITHUB_TOKEN is scoped to this repository, so the org listing returned
+      # only the public repositories, and every private one was reported as a
+      # MUST FIX "no such repository" -- along with merge settings the token
+      # could not read, reported as "unset". Every scheduled run from
+      # 2026-09-07 to 2026-10-05 failed on those findings alone (8 private
+      # repositories, 3 of 11 audited), while the same script run with an
+      # owner token found no drift. A run that is always red for the wrong
+      # reason is how an audit stops being read.
+      #
+      # Both secrets are delivered by Infisical (project crossroads-ci,
+      # Production, /ci, sync ci-ci-prod). README "Fleet drift audit" records
+      # the App's permissions.
+      - name: Check the audit App credentials are configured
         env:
-          # Presence only; the value never reaches this step.
-          HAS_AUDIT_TOKEN: ${{ secrets.FLEET_AUDIT_TOKEN != '' }}
+          # Presence only; the values never reach this step.
+          CLIENT_ID_SET: ${{ secrets.FLEET_AUDIT_APP_CLIENT_ID != '' }}
+          KEY_SET: ${{ secrets.FLEET_AUDIT_APP_PRIVATE_KEY != '' }}
         run: |
-          if [ "$HAS_AUDIT_TOKEN" != "true" ]; then
+          missing=""
+          [ "$CLIENT_ID_SET" = "true" ] || missing="$missing FLEET_AUDIT_APP_CLIENT_ID"
+          [ "$KEY_SET" = "true" ] || missing="$missing FLEET_AUDIT_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
             {
               echo "### Fleet drift audit did not run"
               echo
-              echo "The \`FLEET_AUDIT_TOKEN\` secret is not set, and no other token"
-              echo "can see the fleet's private repositories. See README,"
-              echo "\"Fleet drift audit\", for the permissions it needs."
+              echo "Missing Actions secret(s):${missing}. They belong to the read-only"
+              echo "fleet-audit GitHub App and are delivered by Infisical sync"
+              echo "\`ci-ci-prod\`. No other token can see the fleet's private"
+              echo "repositories. See README, \"Fleet drift audit\"."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::FLEET_AUDIT_TOKEN is not set; the audit cannot see the private fleet repositories."
+            echo "::error::Missing Actions secret(s):${missing}. The audit cannot see the private fleet repositories without the fleet-audit App."
             exit 1
           fi
 
+      # The same pin crossroads-agent-system uses. No `repositories`, so the
+      # token covers every repository the App is installed on -- all of them,
+      # which the classification check needs to find a repository nobody
+      # listed. Every permission is read, the App holds nothing more, and the
+      # token is revoked when the job ends.
+      - name: Mint a read-only token for the audit
+        id: audit-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.FLEET_AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FLEET_AUDIT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-administration: read
+          permission-contents: read
+          permission-metadata: read
+          permission-secrets: read
+          permission-organization-custom-properties: read
+          permission-organization-secrets: read
+
       - name: Audit
         env:
-          GH_TOKEN: ${{ secrets.FLEET_AUDIT_TOKEN }}
+          GH_TOKEN: ${{ steps.audit-token.outputs.token }}
           FLEET_ORG: ${{ github.repository_owner }}
         run: bash scripts/audit-fleet-drift.sh
