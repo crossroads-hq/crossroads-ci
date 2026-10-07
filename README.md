@@ -23,7 +23,8 @@ Here, the JSON profiles are the only copy.
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on anything **uncheckable** — a pin naming a commit this repo lacks, a repository whose workflows could not be read, or a gate-requiring profile with no workflows. `STRICT=1` also fails on anything **not current** — behind, unpinned, or diverged from the base — or still addressing the pre-migration owner, which is counted separately so one pin cannot land in both totals. |
 | `scripts/verify-org-rulesets.sh` | Prove the three **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
-| `scripts/validate-local.sh` | Preflight CI checks locally before push (~5s; optional actionlint/zizmor). |
+| `scripts/audit-fleet-drift.sh` | Report what escapes org governance: unclassified or unlisted repositories, repo-level rulesets, merge settings, shadowed secrets, identity runner selectors, abandoned control-plane pins. Exit 1 on any MUST FIX. Runs weekly as `.github/workflows/fleet-drift-audit.yml`; see [Fleet drift audit](#fleet-drift-audit). |
+| `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/await-codex-review` | Verifies that the exact official Codex account produced a formal review or structured clean-review comment for the pull request's current head. Abbreviated reviewed-commit markers are resolved to a unique full Git object ID before comparison; stale, ambiguous, pending, dismissed, or spoofed evidence does not suppress the fallback. |
@@ -75,6 +76,7 @@ scripts/apply-fleet.sh              # plan (default; mutates nothing)
 APPLY=1 scripts/apply-fleet.sh      # apply
 scripts/verify-org-rulesets.sh      # org rulesets vs governance/; nonzero on drift
 scripts/verify-pins.sh              # which control-plane version each repo runs
+scripts/audit-fleet-drift.sh        # what escapes org governance; nonzero on MUST FIX
 ```
 
 Caller-side, in any fleet repository:
@@ -134,6 +136,32 @@ jobs:
             { "Verify": "${{ needs.verify.result }}",
               "Supply chain": "${{ needs.supply-chain.result }}" }
 ```
+
+### Fleet drift audit
+
+`.github/workflows/fleet-drift-audit.yml` runs `scripts/audit-fleet-drift.sh`
+every Monday and needs the repository secret `FLEET_AUDIT_TOKEN`. Without it
+the run stops at its first step and says so. There is deliberately no
+`GITHUB_TOKEN` fallback. That token is scoped to this repository, so it sees
+only the fleet's public repositories, and the fallback reported every private
+one as missing. Every scheduled run from 2026-09-07 to 2026-10-05 failed on
+those false findings.
+
+A fine-grained personal access token, resource owner `crossroads-hq`, access
+to **all repositories**, read-only:
+
+| Scope | Permission | For |
+|---|---|---|
+| Organization | Custom properties | reading `fleet-profile` |
+| Organization | Secrets | org secret names, for the shadowing check |
+| Repository | Metadata | listing the org's repositories, private ones included; repository rulesets and settings |
+| Repository | Administration | the merge-setting fields, which GitHub omits without admin access |
+| Repository | Contents | workflow files and pin comparisons |
+| Repository | Secrets | repository secret names, for the shadowing check |
+
+Run by hand with an owner token, the script needs no secret:
+`scripts/audit-fleet-drift.sh`. A classic `gh` login without `admin:org`
+cannot read org secrets, so that one check reports as skipped.
 
 This repository is private; fleet repositories can use its actions and
 workflows because Actions access is set to `user` scope

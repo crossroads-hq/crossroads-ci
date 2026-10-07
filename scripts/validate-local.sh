@@ -31,14 +31,20 @@ if [ "${#missing[@]}" -gt 0 ]; then
   exit 1
 fi
 
+# runner-host/ too, as ci.yml does. The preflight once checked scripts/
+# alone, so a runner-host change could pass here and fail in CI.
 echo "Shell syntax"
 n=0
-for f in scripts/*.sh; do bash -n "$f"; n=$((n + 1)); done
+for f in scripts/*.sh runner-host/*.sh; do bash -n "$f"; n=$((n + 1)); done
 echo "  bash -n clean on ${n} scripts"
 
 echo "shellcheck"
-shellcheck scripts/*.sh
+shellcheck scripts/*.sh runner-host/*.sh
 echo "  shellcheck clean"
+
+echo "Runner host tests"
+node --test runner-host/*.test.js
+echo "  runner host tests pass"
 
 echo "Governance profiles parse and render"
 for f in governance/*.json; do jq empty "$f"; done
