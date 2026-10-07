@@ -140,24 +140,41 @@ jobs:
 ### Fleet drift audit
 
 `.github/workflows/fleet-drift-audit.yml` runs `scripts/audit-fleet-drift.sh`
-every Monday and needs the repository secret `FLEET_AUDIT_TOKEN`. Without it
-the run stops at its first step and says so. There is deliberately no
-`GITHUB_TOKEN` fallback. That token is scoped to this repository, so it sees
-only the fleet's public repositories, and the fallback reported every private
-one as missing. Every scheduled run from 2026-09-07 to 2026-10-05 failed on
-those false findings.
+every Monday. It reads the fleet as the **crossroads-ci-fleet-audit** GitHub
+App, never a personal token (crossroads-os ADR-0005 rule 4). Each run mints a
+read-only installation token from two repository secrets:
 
-A fine-grained personal access token, resource owner `crossroads-hq`, access
-to **all repositories**, read-only:
+| Secret | Kind | Source |
+| --- | --- | --- |
+| `FLEET_AUDIT_APP_CLIENT_ID` | config | The App's Client ID |
+| `FLEET_AUDIT_APP_PRIVATE_KEY` | credential | A private key generated on the App, the whole `.pem` |
+
+Both live in Infisical, project `crossroads-ci`, Production, `/ci`, and reach
+this repository only through the sync `ci-ci-prod`. Never set them here by
+hand. Without them the run stops at its first step and says so. There is
+deliberately no `GITHUB_TOKEN` fallback. That token is scoped to this
+repository, so it sees only the fleet's public repositories, and the fallback
+reported every private one as missing. Every scheduled run from 2026-09-07 to
+2026-10-05 failed on those false findings.
+
+The App is owned by `crossroads-hq`, installed on **all repositories** (the
+classification check must see a repository nobody listed), with no webhook
+and nothing but read access. It holds no Administration permission: REST
+returns the merge settings only to a token with Contents write, so the
+audit reads them over GraphQL, which returns them to any reader.
 
 | Scope | Permission | For |
 |---|---|---|
-| Organization | Custom properties | reading `fleet-profile` |
-| Organization | Secrets | org secret names, for the shadowing check |
-| Repository | Metadata | listing the org's repositories, private ones included; repository rulesets and settings |
-| Repository | Administration | the merge-setting fields, which GitHub omits without admin access |
+| Repository | Metadata | listing the org's repositories, private ones included; repository rulesets; merge settings, read over GraphQL |
 | Repository | Contents | workflow files and pin comparisons |
 | Repository | Secrets | repository secret names, for the shadowing check |
+| Organization | Custom properties | reading `fleet-profile` |
+| Organization | Secrets | org secret names, for the shadowing check |
+
+To rotate the key: generate a new one on the App and keep the old one active,
+replace the value in Infisical, let `ci-ci-prod` sync, run the audit by hand
+(Actions, Fleet drift audit, Run workflow) and check it audits every
+repository, then delete the old key on GitHub and the downloaded file.
 
 Run by hand with an owner token, the script needs no secret:
 `scripts/audit-fleet-drift.sh`. A classic `gh` login without `admin:org`
