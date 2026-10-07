@@ -159,12 +159,13 @@ reported every private one as missing. Every scheduled run from 2026-09-07 to
 
 The App is owned by `crossroads-hq`, installed on **all repositories** (the
 classification check must see a repository nobody listed), with no webhook
-and nothing but read access:
+and nothing but read access. It holds no Administration permission: REST
+returns the merge settings only to a token with Contents write, so the
+audit reads them over GraphQL, which returns them to any reader.
 
 | Scope | Permission | For |
 |---|---|---|
-| Repository | Metadata | listing the org's repositories, private ones included; repository rulesets and settings |
-| Repository | Administration | the merge-setting fields, which GitHub omits without admin access |
+| Repository | Metadata | listing the org's repositories, private ones included; repository rulesets; merge settings, read over GraphQL |
 | Repository | Contents | workflow files and pin comparisons |
 | Repository | Secrets | repository secret names, for the shadowing check |
 | Organization | Custom properties | reading `fleet-profile` |
