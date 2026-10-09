@@ -236,16 +236,27 @@ for r in "${repos[@]}"; do
   # Unknown is not compliant: fail rather than inform, or an unreadable
   # repository would leave the audit green with its settings never checked
   # (AGENTS.md, "Unknown state is not absence").
-  meta="$(try "repos/$ORG/$r")" || { fail "\`$r\` metadata unreadable, so its merge settings could not be verified."; continue; }
-  for setting in allow_auto_merge allow_update_branch delete_branch_on_merge; do
-    # Not `.[$s] // "unset"`: jq's `//` treats false as absent, so it would
+  #
+  # GraphQL, not REST. GET /repos/{owner}/{repo} returns these fields only to
+  # a token with Contents WRITE ("To view merge-related settings, you must
+  # have the contents:read and contents:write permissions", Get a repository)
+  # and omits them otherwise -- the scheduled audit's read-only App token
+  # would have reported every compliant repository as unverified. GraphQL
+  # returns the same three values to any token that can read the repository:
+  # checked 2026-10-08 against REST on all eight gated fleet repositories
+  # (identical) and on a public repository readable but not writable.
+  # shellcheck disable=SC2016  # $owner and $name are GraphQL variables
+  meta="$(try graphql \
+    -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed allowUpdateBranch deleteBranchOnMerge } }' \
+    -f owner="$ORG" -f name="$r")" || { fail "\`$r\` merge settings unreadable, so they could not be verified."; continue; }
+  # Reported under the policy's names (repository_settings uses REST's).
+  for pair in allow_auto_merge:autoMergeAllowed allow_update_branch:allowUpdateBranch delete_branch_on_merge:deleteBranchOnMerge; do
+    setting="${pair%%:*}"; field="${pair#*:}"
+    # Not `.[$f] // "unset"`: jq's `//` treats false as absent, so it would
     # report a setting that is plainly off as missing.
-    value="$(jq -r --arg s "$setting" 'if has($s) then .[$s] | tostring else "unset" end' <<<"$meta")"
-    # GitHub omits these fields for a token without admin read on the
-    # repository, so "unset" is unknown, not off: still a failure, but named
-    # as what it is.
+    value="$(jq -r --arg f "$field" '.data.repository // {} | if has($f) and .[$f] != null then .[$f] | tostring else "unset" end' <<<"$meta")"
     if [ "$value" = "unset" ]; then
-      fail "\`$r\` did not return \`$setting\`; GitHub omits it when the token lacks admin read on the repository, so it could not be verified."
+      fail "\`$r\` did not return \`$setting\` (GraphQL \`$field\`), so it could not be verified."
     elif [ "$value" != "true" ]; then
       fail "\`$r\` has \`$setting=$value\`; the policy's repository_settings require \`true\` on gate-enabled repositories."
     fi
