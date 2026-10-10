@@ -30,6 +30,7 @@ Here, the JSON profiles are the only copy.
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/await-codex-review` | Verifies that the exact official Codex account produced a formal review or structured clean-review comment for the pull request's current head. Abbreviated reviewed-commit markers are resolved to a unique full Git object ID before comparison; stale, ambiguous, pending, dismissed, or spoofed evidence does not suppress the fallback. |
+| `actions/update-stale-prs` | Runs `scripts/update-stale-prs.sh` from the pinned commit of this repository. The vehicle for the reusable updater: a caller's token cannot read this private repository, so the script travels inside an action callers may pin. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
 | `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. Keeps the model transcript redacted while surfacing a capped, credential-redacted terminal message for pre-inference API failures. |
@@ -240,15 +241,28 @@ Guardrails, because the PR's content is untrusted:
   settings or hooks from the PR checkout. The script then checks it edited only
   the conflicted files, created none, left no markers, and changed every one.
 - It refuses, and leaves the PR to a human, when the conflict touches
-  `.github/`, `governance/`, `AGENTS.md` or `scripts/validate-local.sh` (the gate
-  and the review contract), is a delete/modify conflict, or when the PR changes
-  `validate-local.sh`, which could not vouch for itself.
+  `.github/`, `governance/` or `AGENTS.md` (the gate and the review contract),
+  is a delete/modify conflict, or touches a file that defines validation
+  (`scripts/validate-local.sh` here), which could not vouch for itself.
 - Validation runs the PR's tests, so it runs in a `bwrap` sandbox (no network,
   no view of your home directory, throwaway `HOME`). `sandbox-exec` on macOS
   cannot exec the setuid `ps` that `runner-host/tmp-clean.test.js` needs, so on
   macOS the script refuses unless `RESOLVE_UNSANDBOXED=1`, which runs the tests
   as you with a scrubbed environment but your credentials readable on disk. Use
   Linux or WSL for the sandboxed path.
+- Validation is per repository. Defaults suit this one; set these to use the
+  tool in another fleet repository:
+
+  | Variable | Default | Meaning |
+  | --- | --- | --- |
+  | `RESOLVE_VALIDATE` | `bash scripts/validate-local.sh` | Command run in the merged tree. Sandboxed it has no network and an empty `HOME`, so it must pass offline; with `RESOLVE_UNSANDBOXED=1` it may install first. |
+  | `RESOLVE_VALIDATE_FILES` | `scripts/validate-local.sh` | Space-separated paths that define validation (script, `package.json`, a lockfile). A conflict in one, or a PR that changes one, is refused: a change cannot vouch for its own checks. |
+  | `RESOLVE_VALIDATE_TOOLS` | `bash shellcheck jq ruby node` | Tools put on the sandbox `PATH`, on top of the system directories. |
+  | `RESOLVE_PROTECTED` | `.github/`, `governance/`, `AGENTS.md` | Extended regex of paths Claude must not resolve. |
+
+  For example, a Node repository:
+  `RESOLVE_UNSANDBOXED=1 RESOLVE_VALIDATE='npm ci && npm test' RESOLVE_VALIDATE_FILES='package.json package-lock.json' RESOLVE_VALIDATE_TOOLS='bash node npm' scripts/resolve-conflicts.sh 123`,
+  run from a checkout of that repository.
 - The commit is signed with your key (`git -S`); the key must be registered on
   GitHub as a signing key. The push uses your credentials, so it starts the
   PR's workflows (a `GITHUB_TOKEN` push would not).

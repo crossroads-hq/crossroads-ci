@@ -17,13 +17,15 @@
 #      rulesets require signed commits and a current branch, and the PR's own
 #      history stays intact.
 #   3. Refuses conflicts in files that define the gate (PROTECTED below),
-#      delete/modify conflicts, and PRs that change scripts/validate-local.sh.
+#      delete/modify conflicts, and PRs that change the files that define validation
+#      (RESOLVE_VALIDATE_FILES).
 #   4. Has Claude resolve the conflicted files. Claude gets Read/Edit/Glob/Grep
 #      only: no shell, no network, no git, no push. It cannot run anything the
 #      PR contains.
 #   5. Checks Claude touched only the conflicted files, left no markers, and
 #      changed every one of them.
-#   6. Commits (signed), then runs scripts/validate-local.sh without
+#   6. Commits (signed), then runs the validation command (RESOLVE_VALIDATE)
+#      without
 #      credentials: scrubbed environment and a throwaway HOME, inside a bwrap
 #      sandbox with no network, no view of your home directory and no writes
 #      outside the scratch directory. It runs PR-controlled code (the tests),
@@ -36,13 +38,30 @@
 # label is removed.
 #
 # Needs: gh (authenticated), git with a signing key registered on GitHub as a
-# signing key, claude, and what scripts/validate-local.sh needs. Validation runs
+# signing key, claude, and what the validation command needs. Validation runs
 # in a bwrap sandbox (Linux, WSL). macOS has no usable sandbox for this repo's
 # tests, so there validation is refused; set RESOLVE_UNSANDBOXED=1 to accept
 # running the PR's tests as you, with your credentials readable on disk.
 #
 # Environment: REPO (default: this checkout's gh repo), RESOLVE_MODEL (claude
 # model), RESOLVE_MAX_BUDGET_USD (default 2).
+#
+# Per-repository validation, so the tool works in any fleet repository:
+#   RESOLVE_VALIDATE        Command run in the merged tree, by bash. Default
+#                           "bash scripts/validate-local.sh". It must pass offline when
+#                           sandboxed (no network, empty HOME): dependencies it
+#                           needs have to be in the tree or on the system.
+#                           Unsandboxed (RESOLVE_UNSANDBOXED=1) it may install.
+#   RESOLVE_VALIDATE_FILES  Space-separated paths that define validation (the
+#                           script, package.json, a lockfile...). A conflict in
+#                           one, or a PR that changes one, is refused: a change
+#                           cannot vouch for its own checks. Default
+#                           scripts/validate-local.sh.
+#   RESOLVE_VALIDATE_TOOLS  Space-separated tools to put on the sandbox PATH,
+#                           on top of the system directories. Default
+#                           "bash shellcheck jq ruby node".
+#   RESOLVE_PROTECTED       Extended regex of paths Claude must not resolve.
+#                           Default: .github/, governance/, AGENTS.md.
 #
 # Exit 0: pushed, or nothing to do. Exit 1: failed, nothing pushed. Exit 2: usage.
 
@@ -51,7 +70,10 @@ set -euo pipefail
 label=needs-rebase
 # Files whose content is the merge gate or the review contract. A model
 # resolving a conflict in these is a change to the rules nobody read.
-protected_re='^(\.github/|governance/|AGENTS\.md$|scripts/validate-local\.sh$)'
+protected_re="${RESOLVE_PROTECTED:-^(\.github/|governance/|AGENTS\.md\$)}"
+validate_cmd="${RESOLVE_VALIDATE:-bash scripts/validate-local.sh}"
+validate_files="${RESOLVE_VALIDATE_FILES:-scripts/validate-local.sh}"
+validate_tools="${RESOLVE_VALIDATE_TOOLS:-bash shellcheck jq ruby node}"
 
 push=1
 if [ "${1:-}" = "--no-push" ]; then
@@ -151,9 +173,16 @@ tr '\0' '\n' <"$scratch/conflicts.z" >"$scratch/conflicts.txt"
 if grep -E "$protected_re" "$scratch/conflicts.txt"; then
   die "the files above define the gate or the review contract. Resolve those by hand."
 fi
-if ! g diff --quiet "$base_sha" "$head_sha" -- scripts/validate-local.sh; then
-  die "PR #$pr changes scripts/validate-local.sh, so it cannot vouch for itself. Resolve by hand."
-fi
+# Word-split on purpose: a space-separated list of repo paths.
+# shellcheck disable=SC2086
+for vf in $validate_files; do
+  if grep -qxF -- "$vf" "$scratch/conflicts.txt"; then
+    die "$vf defines validation and is in conflict. Resolve by hand."
+  fi
+  if ! g diff --quiet "$base_sha" "$head_sha" -- "$vf"; then
+    die "PR #$pr changes $vf, so validation cannot vouch for itself. Resolve by hand."
+  fi
+done
 # A file kept or deleted on one side needs a decision, and Claude cannot delete.
 lonely=$(g ls-files -u | awk -F'\t' '{ split($1, a, " "); s[$2] = s[$2] a[3] }
   END { for (p in s) if (s[p] !~ /2/ || s[p] !~ /3/) print p }')
@@ -228,7 +257,7 @@ fi
 
 g commit -q -S \
   -m "Merge $base into $head" \
-  -m "Conflicts resolved with Claude by scripts/resolve-conflicts.sh and checked with scripts/validate-local.sh before this was pushed.
+  -m "Conflicts resolved with Claude by scripts/resolve-conflicts.sh and checked with its validation command before this was pushed.
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 merge_sha=$(g rev-parse HEAD)
@@ -238,10 +267,11 @@ g cat-file commit "$merge_sha" | grep -q '^gpgsig' ||
 # ---- validation: PR-controlled code runs here, so no credentials -------------
 bin="$scratch/bin"
 mkdir -p "$bin" "$scratch/home" "$scratch/tmp"
-# The tools validate-local.sh requires, wherever they live, on top of the system
-# directories. Homebrew's bin stays off the path, so docker and pipx are not
+# The tools the validation command requires, wherever they live, on top of the
+# system directories. Homebrew's bin stays off the path, so docker and pipx are not
 # found and their optional steps skip: they would need the network.
-for t in bash shellcheck jq ruby node; do
+# shellcheck disable=SC2086
+for t in $validate_tools; do
   if p=$(command -v "$t"); then ln -sf "$p" "$bin/$t"; fi
 done
 # bwrap: read-only root, an empty home (so no ~/.ssh, ~/.config/gh), no
@@ -268,9 +298,9 @@ echo "Validating the merge (no network, no credentials)..."
 if ! (
   cd "$wt"
   ${sandbox[@]+"${sandbox[@]}"} env -i HOME="$scratch/home" TMPDIR="$scratch/tmp" \
-    PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" LANG=C.UTF-8 bash scripts/validate-local.sh
+    PATH="$bin:/usr/bin:/bin:/usr/sbin:/sbin" LANG=C.UTF-8 bash -c "$validate_cmd"
 ); then
-  die "scripts/validate-local.sh failed on the merge. Fix it by hand in the kept worktree."
+  die "validation ($validate_cmd) failed on the merge. Fix it by hand in the kept worktree."
 fi
 
 if [ "$push" -eq 0 ]; then
