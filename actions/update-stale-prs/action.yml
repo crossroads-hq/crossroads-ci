@@ -1,0 +1,39 @@
+name: Update stale PRs
+description: >-
+  Run scripts/update-stale-prs.sh from this repository, at the commit the
+  caller pinned. It exists so that _update-stale-prs.yml can reach the script:
+  a caller's token cannot read this private repository, and minting one that
+  can would grant write here as well. A composite action is the vehicle that
+  Actions-access sharing already lets every fleet repository pin by SHA.
+
+  Needs no checkout of the caller. The token must be able to push: see the
+  script's header for why it cannot be GITHUB_TOKEN.
+
+inputs:
+  token:
+    description: >-
+      A token with contents and pull-requests write on `repo`, minted from the
+      PR-updater GitHub App. Not GITHUB_TOKEN: its pushes start no workflows.
+    required: true
+  repo:
+    description: owner/name of the repository whose pull requests to update.
+    required: false
+    default: ${{ github.repository }}
+  base:
+    description: Base branch whose pull requests to keep current.
+    required: false
+    default: main
+
+runs:
+  using: composite
+  steps:
+    - name: Update PRs that are behind
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+        BASE: ${{ inputs.base }}
+        ACTION_PATH: ${{ github.action_path }}
+      # The script sits two directories up in the checkout of this repository
+      # that Actions makes at the pinned SHA, so there is one copy of it.
+      run: bash "$ACTION_PATH/../../scripts/update-stale-prs.sh"
