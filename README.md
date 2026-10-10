@@ -115,12 +115,12 @@ jobs:
     # detector; GitHub does not expose Codex quota state to this workflow.
     with:
       codex-wait-seconds: 300
-    # Pass at least one; the API key wins when both are set. Both are
-    # crossroads-hq org secrets delivered by Infisical (crossroads-fleet /
-    # prod / ci); the key is scoped to the Console's CI workspace.
+    # The company Console key (CI workspace), a crossroads-hq org secret
+    # delivered by Infisical (crossroads-fleet / prod / ci). The callee still
+    # accepts `claude-code-oauth-token` and prefers the key when both are set,
+    # but no fleet caller passes the OAuth token any more; it is being retired.
     secrets:
       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   gate:
     name: PR Validation            # the name IS the contract — never rename
