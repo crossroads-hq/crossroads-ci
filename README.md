@@ -25,6 +25,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/verify-org-rulesets.sh` | Prove the three **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
 | `scripts/audit-fleet-drift.sh` | Report what escapes org governance: unclassified or unlisted repositories, repo-level rulesets, merge settings, shadowed secrets, identity runner selectors, abandoned control-plane pins. Exit 1 on any MUST FIX. Runs weekly as `.github/workflows/fleet-drift-audit.yml`; see [Fleet drift audit](#fleet-drift-audit). |
 | `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
+| `scripts/resolve-conflicts.sh` | Resolve the conflicts on a `needs-rebase` PR with Claude, on demand and locally: merge the base into the head in a scratch worktree, validate, push a signed merge commit. Never force-pushes; never touches forks. See [Resolving conflicts](#resolving-conflicts). |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
@@ -215,6 +216,52 @@ The workflow requests exactly these three, so the token fails to mint until
 the App holds all of them. Deliver both secrets through Infisical
 like the fleet-audit App's. Without them the run fails at its first step and
 says why.
+
+### Resolving conflicts
+
+A PR that `update-stale-prs.yml` labels `needs-rebase` conflicts with `main`.
+Resolve it with Claude from a checkout of this repository:
+
+```bash
+scripts/resolve-conflicts.sh 123          # PR number
+scripts/resolve-conflicts.sh --no-push 123 # stop after validation, to look first
+```
+
+It merges `main` into the PR branch in a scratch worktree (a merge commit, not a
+rebase: the rulesets require signed commits and the PR's history stays intact),
+has Claude resolve the conflicted files, runs `scripts/validate-local.sh`, and
+only then pushes the merge commit as a plain fast-forward and removes the label.
+If anything fails it pushes nothing, leaves the label on, and keeps the scratch
+worktree (path printed). It never force-pushes and refuses fork PRs.
+
+Guardrails, because the PR's content is untrusted:
+
+- Claude gets Read, Edit, Glob and Grep only: no shell, no network, no git, no
+  settings or hooks from the PR checkout. The script then checks it edited only
+  the conflicted files, created none, left no markers, and changed every one.
+- It refuses, and leaves the PR to a human, when the conflict touches
+  `.github/`, `governance/`, `AGENTS.md` or `scripts/validate-local.sh` (the gate
+  and the review contract), is a delete/modify conflict, or when the PR changes
+  `validate-local.sh`, which could not vouch for itself.
+- Validation runs the PR's tests, so it runs in a `bwrap` sandbox (no network,
+  no view of your home directory, throwaway `HOME`). `sandbox-exec` on macOS
+  cannot exec the setuid `ps` that `runner-host/tmp-clean.test.js` needs, so on
+  macOS the script refuses unless `RESOLVE_UNSANDBOXED=1`, which runs the tests
+  as you with a scrubbed environment but your credentials readable on disk. Use
+  Linux or WSL for the sandboxed path.
+- The commit is signed with your key (`git -S`); the key must be registered on
+  GitHub as a signing key. The push uses your credentials, so it starts the
+  PR's workflows (a `GITHUB_TOKEN` push would not).
+
+**Why not a CI workflow.** A `workflow_dispatch` job with an Anthropic API key
+would mean a job holding a write token next to a checkout of the PR head, next
+to a model reading PR text. Doing that safely takes three jobs (resolve with no
+write token, validate with no credentials and no network, push with the token
+and no PR code) plus a way to sign the merge commit with the App, for a task
+that happens a few times a month and ends with a human watching the PR anyway.
+The local tool keeps the model and the PR's code away from every CI credential.
+Revisit if conflicts become frequent enough that waiting for someone at a
+keyboard hurts.
 
 ## Rules that keep this honest
 
