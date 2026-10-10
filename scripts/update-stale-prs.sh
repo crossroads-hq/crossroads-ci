@@ -19,7 +19,8 @@
 # PR would never re-run PR Validation and would sit unmergeable.
 #
 # Exit 1 if the PR list may be incomplete, a PR's state could not be read, or
-# an update failed for a reason other than a conflict or a race. A PR that
+# an update failed for a reason other than a conflict or a race (an
+# unrecognised 422 counts as a failure). A PR that
 # cannot be updated because it conflicts, or because it moved while this ran,
 # is left alone: that one is its author's to resolve. A conflicting PR gets one
 # comment per head commit and the `needs-rebase` label, which the next
@@ -57,9 +58,14 @@ flag_conflict() { # number sha
     >/dev/null 2>&1 || true
   gh pr edit "$1" --repo "$REPO" --add-label "$label" >/dev/null ||
     echo "::warning::PR #$1: could not add the $label label."
-  local marker="<!-- update-stale-prs:conflict $2 -->"
-  if ! gh pr view "$1" --repo "$REPO" --json comments --jq '.comments[].body' |
-    grep -qF "$marker"; then
+  local marker="<!-- update-stale-prs:conflict $2 -->" bodies
+  # Every page of PR comments, and a failed read is unknown state, not "no
+  # marker": posting blind could duplicate the comment on each run.
+  if ! bodies=$(gh api --paginate "repos/$REPO/issues/$1/comments" --jq '.[].body'); then
+    echo "::error::PR #$1: could not read its comments to check for the conflict notice."
+    return 1
+  fi
+  if ! grep -qF "$marker" <<<"$bodies"; then
     gh pr comment "$1" --repo "$REPO" --body "$marker
 This branch conflicts with \`$BASE\`, so it cannot be updated automatically and auto-merge will stay blocked. Rebase or merge \`$BASE\` and resolve the conflicts." >/dev/null ||
       echo "::warning::PR #$1: could not post the conflict comment."
@@ -87,10 +93,13 @@ while IFS=$'\t' read -r number sha labelled; do
     echo "PR #$number: updated ($behind commit(s) behind $BASE)."
     updated=$((updated + 1))
     [ "$labelled" = "true" ] && clear_label "$number"
-  elif grep -qi 'HTTP 422.*conflict' <<<"$out"; then
+  # gh prints "<message> (HTTP 422)": the message comes first, so match the
+  # two independently. Only the two known 422s are benign; any other 422 is
+  # unknown state and fails the run.
+  elif grep -qi 'merge conflict' <<<"$out" && grep -q 'HTTP 422' <<<"$out"; then
     echo "::warning::PR #$number: conflicts with $BASE. Left for its author."
-    flag_conflict "$number" "$sha"
-  elif grep -q 'HTTP 422' <<<"$out"; then
+    flag_conflict "$number" "$sha" || failed=1
+  elif grep -qi 'head sha' <<<"$out" && grep -q 'HTTP 422' <<<"$out"; then
     echo "::warning::PR #$number: not updated, it changed during the run."
   else
     echo "::error::PR #$number: update failed: $out"
