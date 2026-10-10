@@ -67,7 +67,7 @@ flag_conflict() { # number sha
   fi
   if ! grep -qF "$marker" <<<"$bodies"; then
     gh pr comment "$1" --repo "$REPO" --body "$marker
-This branch conflicts with \`$BASE\`, so it cannot be updated automatically and auto-merge will stay blocked. Rebase or merge \`$BASE\` and resolve the conflicts." >/dev/null ||
+This branch conflicts with \`$BASE\`, so it cannot be updated automatically and auto-merge will stay blocked. Merge \`$BASE\` into it and resolve the conflicts, or run \`scripts/resolve-conflicts.sh $1\` from a checkout to have Claude do it." >/dev/null ||
       echo "::warning::PR #$1: could not post the conflict comment."
   fi
 }
