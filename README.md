@@ -193,8 +193,9 @@ cannot get past that. `.github/workflows/update-stale-prs.yml` clicks it on
 every push to `main`, for PRs that are open, not drafts, from this repository,
 and have **auto-merge enabled**. Enable auto-merge (`gh pr merge --auto`) to
 opt a PR in. PRs without it are left alone, so a merge does not re-run CI and
-AI review on every open PR. A PR that conflicts is reported as a warning and
-left to its author.
+AI review on every open PR. A PR that conflicts is left to its author, with a
+`needs-rebase` label and one comment per head commit; the label comes off once
+the PR is current again.
 
 It authenticates as a GitHub App, not `GITHUB_TOKEN`: a push made with
 `GITHUB_TOKEN` starts no workflows, so the updated PR would never re-run
