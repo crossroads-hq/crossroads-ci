@@ -24,6 +24,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on anything **uncheckable** — a pin naming a commit this repo lacks, a repository whose workflows could not be read, or a gate-requiring profile with no workflows. `STRICT=1` also fails on anything **not current** — behind, unpinned, or diverged from the base — or still addressing the pre-migration owner, which is counted separately so one pin cannot land in both totals. |
 | `scripts/verify-org-rulesets.sh` | Prove the three **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
 | `scripts/audit-fleet-drift.sh` | Report what escapes org governance: unclassified or unlisted repositories, repo-level rulesets, merge settings, shadowed secrets, identity runner selectors, abandoned control-plane pins. Exit 1 on any MUST FIX. Runs weekly as `.github/workflows/fleet-drift-audit.yml`; see [Fleet drift audit](#fleet-drift-audit). |
+| `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
@@ -183,6 +184,32 @@ cannot read org secrets, so that one check reports as skipped.
 This repository is private; fleet repositories can use its actions and
 workflows because Actions access is set to `user` scope
 (`gh api repos/crossroads-hq/crossroads-ci/actions/permissions/access`).
+
+### Stale PR updates
+
+The rulesets require a branch to be current with `main`, so each merge strands
+every other open PR until someone clicks "Update branch", and auto-merge
+cannot get past that. `.github/workflows/update-stale-prs.yml` clicks it on
+every push to `main`, for PRs that are open, not drafts, from this repository,
+and have **auto-merge enabled**. Enable auto-merge (`gh pr merge --auto`) to
+opt a PR in. PRs without it are left alone, so a merge does not re-run CI and
+AI review on every open PR. A PR that conflicts is reported as a warning and
+left to its author.
+
+It authenticates as a GitHub App, not `GITHUB_TOKEN`: a push made with
+`GITHUB_TOKEN` starts no workflows, so the updated PR would never re-run
+`PR Validation`.
+
+| Secret | Kind | Source |
+| --- | --- | --- |
+| `PR_UPDATER_APP_CLIENT_ID` | config | The App's Client ID |
+| `PR_UPDATER_APP_PRIVATE_KEY` | credential | A private key generated on the App, the whole `.pem` |
+
+App setup (owner action): create a GitHub App owned by `crossroads-hq`, no
+webhook, with Repository permissions **Contents: write** and **Pull requests:
+write**, installed on this repository. Deliver both secrets through Infisical
+like the fleet-audit App's. Without them the run fails at its first step and
+says why.
 
 ## Rules that keep this honest
 

@@ -1,0 +1,74 @@
+# Keeps auto-merge PRs current with main.
+#
+# The org ruleset requires branches to be up to date with main, so each merge
+# strands the other open PRs until someone clicks "Update branch". This does
+# the click for PRs that have auto-merge enabled, so they re-run PR Validation
+# and merge on their own. scripts/update-stale-prs.sh has the selection rules.
+#
+# ubuntu-latest, deliberately, for the reason fleet-drift-audit.yml gives: a
+# job that needs the self-hosted fleet is silent when the fleet is down.
+name: Update stale PRs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One run at a time, queued rather than cancelled: a run cancelled mid-loop
+# would leave PRs behind until the next merge to main.
+concurrency:
+  group: update-stale-prs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Update stale PRs
+    # A manual run from another branch would execute that branch's script
+    # with the write token.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Script and workflow are read from main, the commit this run was
+      # triggered for, never from a PR: this job holds a write-capable token.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the App credentials are configured
+        env:
+          # Presence only; the values never reach this step.
+          CLIENT_ID_SET: ${{ secrets.PR_UPDATER_APP_CLIENT_ID != '' }}
+          KEY_SET: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY != '' }}
+        run: |
+          missing=""
+          [ "$CLIENT_ID_SET" = "true" ] || missing="$missing PR_UPDATER_APP_CLIENT_ID"
+          [ "$KEY_SET" = "true" ] || missing="$missing PR_UPDATER_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing Actions secret(s):${missing}. GITHUB_TOKEN cannot stand in: its pushes start no workflows, so updated PRs would never re-run PR Validation. See README, \"Stale PR updates\"."
+            exit 1
+          fi
+
+      # Scoped to this repository, and to the two permissions update-branch
+      # needs. The token is revoked when the job ends.
+      - name: Mint a token for the update
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.PR_UPDATER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Update PRs that are behind
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ github.repository }}
+          BASE: main
+        run: bash scripts/update-stale-prs.sh
