@@ -207,8 +207,12 @@ It authenticates as a GitHub App, not `GITHUB_TOKEN`: a push made with
 | `PR_UPDATER_APP_PRIVATE_KEY` | credential | A private key generated on the App, the whole `.pem` |
 
 App setup (owner action): create a GitHub App owned by `crossroads-hq`, no
-webhook, with Repository permissions **Contents: write** and **Pull requests:
-write**, installed on this repository. Deliver both secrets through Infisical
+webhook, with Repository permissions **Contents: write**, **Pull requests: write**
+and **Workflows: write**, installed on this repository. Workflows is needed
+because the merge `update-branch` creates carries any `.github/workflows`
+change from `main`, and GitHub rejects such a commit from an App without it.
+The workflow requests exactly these three, so the token fails to mint until
+the App holds all of them. Deliver both secrets through Infisical
 like the fleet-audit App's. Without them the run fails at its first step and
 says why.
 

@@ -53,8 +53,10 @@ jobs:
             exit 1
           fi
 
-      # Scoped to this repository, and to the two permissions update-branch
-      # needs. The token is revoked when the job ends.
+      # Scoped to this repository, and to the three permissions update-branch
+      # needs. Workflows is one of them because the merge it creates carries
+      # whatever main changed under .github/workflows, and GitHub rejects such
+      # a commit from an App without it. The token is revoked when the job ends.
       - name: Mint a token for the update
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -65,6 +67,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
           permission-pull-requests: write
+          permission-workflows: write
 
       - name: Update PRs that are behind
         env:
