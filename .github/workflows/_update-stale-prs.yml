@@ -1,0 +1,110 @@
+# Reusable: keep a repository's auto-merge pull requests current with its base.
+#
+# The rulesets require a branch to be up to date with its base, so each merge
+# strands every other open PR until someone clicks "Update branch", and
+# auto-merge cannot get past that. This does the click, for PRs that have
+# auto-merge enabled. scripts/update-stale-prs.sh has the selection rules;
+# README, "Stale PR updates", has the setup, including the GitHub App.
+#
+# Callable from any fleet repository. The caller fires it on push to its base
+# branch:
+#
+#   on: { push: { branches: [main] }, workflow_dispatch: }
+#   jobs:
+#     update:
+#       uses: crossroads-hq/crossroads-ci/.github/workflows/_update-stale-prs.yml@<sha>
+#       secrets:
+#         app-client-id: ${{ secrets.PR_UPDATER_APP_CLIENT_ID }}
+#         app-private-key: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY }}
+#
+# This repository runs update-stale-prs.yml instead, which calls the script
+# from its own checkout so it is always current. Keep the token permissions in
+# the two in step.
+name: Update stale PRs
+
+on:
+  workflow_call:
+    inputs:
+      base-branch:
+        description: >-
+          Branch whose pull requests are kept current. The job runs only when
+          the caller was triggered for this branch, so a manual run from some
+          other branch cannot use the write token.
+        type: string
+        required: false
+        default: main
+      runner-labels:
+        description: >-
+          JSON array of `runs-on` labels, as in _workflow-lint.yml. Defaults to
+          GitHub-hosted, deliberately: this job is silent when it cannot start,
+          and the self-hosted fleet being down is exactly when nobody would
+          notice. A PRIVATE caller pays hosted minutes (one short job per merge
+          to the base branch); it may pass self-hosted Linux labels instead.
+          The runner needs gh and jq.
+        type: string
+        required: false
+        default: '["ubuntu-latest"]'
+    secrets:
+      app-client-id:
+        description: Client ID of the PR-updater GitHub App.
+        required: true
+      app-private-key:
+        description: A private key generated on that App, the whole .pem.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Update stale PRs
+    # github.ref is the CALLER's ref in a reusable workflow.
+    if: github.ref == format('refs/heads/{0}', inputs.base-branch)
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: 10
+    # One run per repository at a time, queued rather than cancelled: a run
+    # cancelled mid-loop would leave PRs behind until the next merge.
+    concurrency:
+      group: update-stale-prs-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Check the App credentials are configured
+        env:
+          # Presence only; the values never reach this step.
+          CLIENT_ID_SET: ${{ secrets.app-client-id != '' }}
+          KEY_SET: ${{ secrets.app-private-key != '' }}
+        run: |
+          missing=""
+          [ "$CLIENT_ID_SET" = "true" ] || missing="$missing app-client-id"
+          [ "$KEY_SET" = "true" ] || missing="$missing app-private-key"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secret(s) passed to the updater:${missing}. GITHUB_TOKEN cannot stand in: its pushes start no workflows, so updated PRs would never re-run PR Validation. See crossroads-ci README, \"Stale PR updates\"."
+            exit 1
+          fi
+
+      # Scoped to the CALLING repository only, and to the three permissions
+      # update-branch needs; Workflows because the merge it creates carries
+      # whatever the base changed under .github/workflows. The token is revoked
+      # when the job ends. The App must be installed on the caller.
+      - name: Mint a token for the update
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      # The script travels in this repository's action, pinned by SHA: the
+      # caller's token cannot read this private repository, so it cannot
+      # check it out. Nothing from the caller is executed. After changing
+      # scripts/update-stale-prs.sh, bump this pin to a commit on main.
+      - name: Update PRs that are behind
+        uses: crossroads-hq/crossroads-ci/actions/update-stale-prs@52755881822cb5c935a0b0e7bd4f6e6c261045ca # crossroads-ci#95, adds this action
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repo: ${{ github.repository }}
+          base: ${{ inputs.base-branch }}

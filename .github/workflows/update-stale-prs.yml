@@ -5,6 +5,9 @@
 # the click for PRs that have auto-merge enabled, so they re-run PR Validation
 # and merge on their own. scripts/update-stale-prs.sh has the selection rules.
 #
+# Fleet repositories call _update-stale-prs.yml instead; keep the token
+# permissions below in step with it.
+#
 # ubuntu-latest, deliberately, for the reason fleet-drift-audit.yml gives: a
 # job that needs the self-hosted fleet is silent when the fleet is down.
 name: Update stale PRs
