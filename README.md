@@ -34,6 +34,7 @@ Here, the JSON profiles are the only copy.
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
 | `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. Keeps the model transcript redacted while surfacing a capped, credential-redacted terminal message for pre-inference API failures. |
+| `.github/workflows/_update-stale-prs.yml` | Reusable: mint the PR-updater App token for the calling repository and run `actions/update-stale-prs`, keeping its auto-merge PRs current. See [Stale PR updates](#stale-pr-updates). |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
 
 A Codex thumbs-up reaction never suppresses Claude: reactions carry no head SHA,
@@ -276,6 +277,49 @@ that happens a few times a month and ends with a human watching the PR anyway.
 The local tool keeps the model and the PR's code away from every CI credential.
 Revisit if conflicts become frequent enough that waiting for someone at a
 keyboard hurts.
+
+#### In other fleet repositories
+
+Add a caller on push to the repository's base branch, pinned to a SHA like the
+other reusable workflows:
+
+```yaml
+name: Update stale PRs
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  update:
+    uses: crossroads-hq/crossroads-ci/.github/workflows/_update-stale-prs.yml@<commit-sha>
+    secrets:
+      app-client-id: ${{ secrets.PR_UPDATER_APP_CLIENT_ID }}
+      app-private-key: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY }}
+```
+
+Per repository, that is all, once the owner has done the one-time setup:
+
+- Install the App on the repository, and make the two secrets visible to it.
+  Set them at **org level** (selected repositories) rather than per repository;
+  `crossroads-ci` itself has them at repository level today.
+- The base branch is `main` unless the caller passes `with: { base-branch: ... }`.
+  The job refuses to run for any other ref, so a manual run from a feature
+  branch cannot use the token.
+- It runs on a GitHub-hosted runner by default, one short job per merge. A
+  private repository pays for those minutes; pass
+  `with: { runner-labels: '["self-hosted","Linux","X64","light"]' }` to use the
+  fleet instead, at the cost of silence when the fleet is down. The runner
+  needs `gh` and `jq`.
+- Only repositories whose profile enforces strict up-to-date branches gain
+  anything (`full` and `full+tags` in `governance/repositories.txt`); on
+  `minimal` there is nothing to click.
+
+The reusable workflow runs the script from this repository through
+`actions/update-stale-prs`, pinned by SHA inside it. After changing
+`scripts/update-stale-prs.sh`, bump that pin to a commit on `main`; callers then
+pick the new script up by bumping their own pin of the workflow.
 
 ## Rules that keep this honest
 
