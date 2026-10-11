@@ -38,9 +38,13 @@ on:
           JSON array of `runs-on` labels, as in _workflow-lint.yml. Defaults to
           GitHub-hosted, deliberately: this job is silent when it cannot start,
           and the self-hosted fleet being down is exactly when nobody would
-          notice. A PRIVATE caller pays hosted minutes (one short job per merge
-          to the base branch); it may pass self-hosted Linux labels instead.
-          The runner needs gh and jq.
+          notice. Keep it there even for a PRIVATE caller, which pays about one
+          hosted minute per merge to the base branch: this job receives the
+          crossroads-ci-pr-updater App's private key, which can mint Contents,
+          Pull requests and Workflows write tokens for every repository the App
+          is installed on, so it must not run on the shared, persistent
+          self-hosted fleet where pull-request code also runs (owner decision,
+          2026-10-12; hq#114). The runner needs gh and jq.
         type: string
         required: false
         default: '["ubuntu-latest"]'
