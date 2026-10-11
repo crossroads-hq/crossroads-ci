@@ -260,7 +260,8 @@ mq_want="$(jq -S '{target, enforcement, refs: .conditions.ref_name, rules: [.rul
 while IFS= read -r mq_repo; do
   case "$mq_repo" in ''|'#'*) continue ;; esac
   r="${mq_repo#"$ORG"/}"
-  mq_list="$(try "repos/$ORG/$r/rulesets")" || { fail "\`$r\` rulesets unreadable — its declared merge queue was NOT checked."; continue; }
+  # Paginated: a duplicate past the first page of 30 must still count.
+  mq_list="$(try --paginate --slurp "repos/$ORG/$r/rulesets" | jq '[.[][]]')" || { fail "\`$r\` rulesets unreadable — its declared merge queue was NOT checked."; continue; }
   mq_ids="$(jq -r --arg n "$mq_name" '[.[] | select(.source_type == "Repository" and .name == $n) | .id] | join(" ")' <<<"$mq_list")"
   case "$(wc -w <<<"$mq_ids" | tr -d ' ')" in
     0) fail "\`$r\` is listed in governance/merge-queue-repositories.txt but has no ruleset named ${mq_name}: it has no merge queue."; continue ;;
@@ -276,6 +277,18 @@ while IFS= read -r mq_repo; do
   else
     info "\`$r\` merge queue matches the profile."
   fi
+  # The queue merges with the profile's method; a repository that disallows
+  # it queues PRs that can never merge, with the ruleset itself still exact.
+  # GraphQL, as in 2b, so the read-only audit token can see it.
+  mq_method="$(jq -r '.rules[] | select(.type == "merge_queue") | .parameters.merge_method' governance/ruleset-merge-queue.json)"
+  case "$mq_method" in
+    MERGE) mq_field=mergeCommitAllowed ;;
+    SQUASH) mq_field=squashMergeAllowed ;;
+    REBASE) mq_field=rebaseMergeAllowed ;;
+    *) fail "governance/ruleset-merge-queue.json has an unknown merge_method ${mq_method}."; continue ;;
+  esac
+  mq_allowed="$(try graphql -f query="{ repository(owner: \"$ORG\", name: \"$r\") { $mq_field } }" | jq -r ".data.repository.$mq_field")" || mq_allowed=unknown
+  [ "$mq_allowed" = "true" ] || fail "\`$r\` has $mq_field=${mq_allowed}, but its merge queue merges with ${mq_method}: queued PRs cannot merge."
 done < governance/merge-queue-repositories.txt
 
 # ---------------------------- 2b. merge settings on gate-enabled repositories
