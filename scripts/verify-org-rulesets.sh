@@ -242,6 +242,14 @@ while IFS= read -r mq_repo; do
     status=1
     continue
   }
+  # GitHub omits bypass_actors from a repository ruleset unless the reader
+  # has write access, and canon would read the absence as "none". Unknown is
+  # not absence: refuse to compare rather than report a bypass list unseen.
+  if ! jq -e 'has("bypass_actors")' <<<"$mq_live" >/dev/null; then
+    echo "  BROKEN: ruleset $mq_id was returned without bypass_actors (the token lacks write access to $mq_repo); NOT checked"
+    status=1
+    continue
+  fi
   diff_out="$(mktemp)"
   if diff -u <(canon < "$mq_profile") <(canon <<<"$mq_live") > "$diff_out" 2>&1; then
     echo "  ok: rules, parameters, enforcement and bypass match"
