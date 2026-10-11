@@ -1,0 +1,86 @@
+# Weekly: list, and when enabled remove, offline self-hosted runner
+# registrations for the fleet. scripts/clean-runners.sh holds the rules and is
+# dry-run unless APPLY=1. The disk side of runner cleanup is not here: a job
+# lands on one arbitrary runner, so per-host work is a systemd timer on each
+# host (runner-host/fleet-runner-clean.sh).
+#
+# Runs on ubuntu-latest, deliberately: it must work while the fleet is down.
+#
+# GitHub reports a runner as offline, never for how long, and a host that is
+# merely down looks the same as a retired one. So the scheduled run only
+# removes registrations when the repository variable RUNNER_CLEANUP_APPLY is
+# "true"; until then it lists them in the job summary. A manual run removes
+# only when its `apply` input is ticked.
+name: Runner cleanup
+
+on:
+  schedule:
+    # Sundays 06:30 UTC, after the branch cleanup and before the Monday audit.
+    - cron: '30 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Remove offline runner registrations (otherwise only list them)
+        type: boolean
+        default: false
+
+concurrency:
+  group: runner-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  clean:
+    name: Runner cleanup
+    # A write-capable token: never from a branch other than the one that holds
+    # the reviewed script.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A separate App from the branch cleaner: runner administration is a
+      # much larger permission than deleting a branch, and should not ride on
+      # the same key. Delivered by Infisical like the others.
+      - name: Check the runner-cleaner App credentials are configured
+        env:
+          # Presence only; the values never reach this step.
+          CLIENT_ID_SET: ${{ secrets.RUNNER_CLEANER_APP_CLIENT_ID != '' }}
+          KEY_SET: ${{ secrets.RUNNER_CLEANER_APP_PRIVATE_KEY != '' }}
+        run: |
+          missing=""
+          [ "$CLIENT_ID_SET" = "true" ] || missing="$missing RUNNER_CLEANER_APP_CLIENT_ID"
+          [ "$KEY_SET" = "true" ] || missing="$missing RUNNER_CLEANER_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            {
+              echo "### Runner cleanup did not run"
+              echo
+              echo "Missing Actions secret(s):${missing}. They belong to the"
+              echo "runner-cleaner GitHub App. See README, \"Weekly cleanup\"."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Missing Actions secret(s):${missing}. The runner cleanup cannot see the fleet's runners without the runner-cleaner App."
+            exit 1
+          fi
+
+      - name: Mint a token for the cleanup
+        id: cleaner-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RUNNER_CLEANER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RUNNER_CLEANER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-administration: write
+          permission-organization-self-hosted-runners: write
+          permission-metadata: read
+
+      - name: Clean runner registrations
+        env:
+          GH_TOKEN: ${{ steps.cleaner-token.outputs.token }}
+          APPLY: ${{ ((github.event_name == 'schedule' && vars.RUNNER_CLEANUP_APPLY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.apply)) && '1' || '0' }}
+        run: bash scripts/clean-runners.sh

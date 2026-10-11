@@ -25,6 +25,8 @@ Here, the JSON profiles are the only copy.
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on anything **uncheckable** — a pin naming a commit this repo lacks, a repository whose workflows could not be read, or a gate-requiring profile with no workflows. `STRICT=1` also fails on anything **not current** — behind, unpinned, or diverged from the base — or still addressing the pre-migration owner, which is counted separately so one pin cannot land in both totals. |
 | `scripts/verify-org-rulesets.sh` | Prove the **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
 | `scripts/audit-fleet-drift.sh` | Report what escapes org governance: unclassified or unlisted repositories, repo-level rulesets, merge settings, shadowed secrets, identity runner selectors, abandoned control-plane pins. Exit 1 on any MUST FIX. Runs weekly as `.github/workflows/fleet-drift-audit.yml`; see [Fleet drift audit](#fleet-drift-audit). |
+| `scripts/clean-branches.sh` | Delete finished remote branches across the roster: closed pull request with an unchanged head, never the default or an open-PR branch. **Dry-run by default**; `APPLY=1` mutates. Runs weekly as `.github/workflows/branch-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
+| `scripts/clean-runners.sh` | List, and with `APPLY=1` remove, offline self-hosted runner registrations. Runs weekly as `.github/workflows/runner-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
 | `scripts/resolve-conflicts.sh` | Resolve the conflicts on a `needs-rebase` PR with Claude, on demand and locally: merge the base into the head in a scratch worktree, validate, push a signed merge commit. Never force-pushes; never touches forks. See [Resolving conflicts](#resolving-conflicts). |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
@@ -188,6 +190,61 @@ cannot read org secrets, so that one check reports as skipped.
 This repository is private; fleet repositories can use its actions and
 workflows because Actions access is set to `user` scope
 (`gh api repos/crossroads-hq/crossroads-ci/actions/permissions/access`).
+
+### Weekly cleanup
+
+Three jobs keep the fleet tidy. All are dry-run until switched on, and none of
+them depends on the self-hosted fleet being up, except the host timer, which
+runs on the hosts themselves.
+
+| Job | Where | When | What |
+|---|---|---|---|
+| Branch cleanup | `.github/workflows/branch-cleanup.yml`, `scripts/clean-branches.sh` | Sundays 06:00 UTC | Deletes finished remote branches on every repository in `governance/repositories.txt`. |
+| Runner registration cleanup | `.github/workflows/runner-cleanup.yml`, `scripts/clean-runners.sh` | Sundays 06:30 UTC | Lists, and when enabled removes, offline self-hosted runner registrations. |
+| Runner host cleanup | `runner-host/fleet-runner-clean.sh` and its systemd timer | Sundays 04:00 local, idle only | Old `_work` checkouts and `_temp`, merged local branches in the checkouts, an oversized npm cache, Docker leftovers. See [runner-host/README.md](runner-host/README.md). |
+
+**What counts as a deletable branch.** Not the default branch, the roster's
+branch, a protected branch or a `gh-readonly-queue/*` branch; no open pull
+request has it as its head; and a closed pull request from the same repository
+has the branch's current tip as its head commit. A branch with no pull request
+is never deleted, however old, and neither is one with commits pushed after its
+pull request closed. A merged-into-default test was left out on purpose: a
+branch created today from the tip of `main` is "merged" too. Every deletion
+prints the branch's tip, so it can be restored with
+`git push origin <sha>:refs/heads/<name>`. An unreadable list is an error, and
+more than 50 deletable branches in one repository (`MAX_DELETE`) deletes none
+there.
+
+**Switching it on.** A scheduled run only deletes when the repository variable
+`BRANCH_CLEANUP_APPLY` is `true`, and only removes runner registrations when
+`RUNNER_CLEANUP_APPLY` is `true`. Until then each run lists what it would do in
+the job summary. Read one summary, then set the variable. A manual run
+(Actions, Run workflow) acts only if its `apply` box is ticked. By hand:
+`scripts/clean-branches.sh` is a dry run, `APPLY=1 scripts/clean-branches.sh`
+deletes.
+
+**Offline runners are a judgement call.** GitHub reports a runner as offline,
+never for how long, and a host that is merely down looks like a retired one;
+removing the registration means registering the runner again by hand. GitHub
+already removes a runner that has not connected for 14 days. The script never
+removes a busy runner, and treats a scope in which every runner is offline as
+"the fleet is down" and removes nothing from it. Keep `RUNNER_CLEANUP_APPLY`
+unset unless you want that anyway.
+
+**Two GitHub Apps, one secret pair each**, delivered by Infisical like the
+others and never set by hand. Neither exists yet; both are created by an
+organization owner:
+
+| App | Secrets | Permissions | Installed on |
+|---|---|---|---|
+| `crossroads-ci-branch-cleaner` | `BRANCH_CLEANER_APP_CLIENT_ID`, `BRANCH_CLEANER_APP_PRIVATE_KEY` | Contents: write, Pull requests: read, Metadata: read | The repositories in `governance/repositories.txt` |
+| `crossroads-ci-runner-cleaner` | `RUNNER_CLEANER_APP_CLIENT_ID`, `RUNNER_CLEANER_APP_PRIVATE_KEY` | Administration: write (repository), Self-hosted runners: write (organization), Metadata: read | The same repositories |
+
+They are separate because runner administration is a much larger permission
+than deleting a branch. Without the secrets a run fails with a message naming
+them; it never falls back to `GITHUB_TOKEN`, which sees only this repository.
+The rulesets already forbid deleting `main`, and `v*` tags on `full+tags`
+repositories, as a second line of defence.
 
 ### Stale PR updates
 

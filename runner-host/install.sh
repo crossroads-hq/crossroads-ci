@@ -10,7 +10,8 @@
 # unscheduled runs hold the dpkg lock under CI jobs (crossroads-ci#50), and
 # replaces them with fleet-idle-update.timer. It also installs
 # fleet-tmp-clean.timer, which removes stale CI scratch folders from /tmp daily,
-# and masks tmp.mount, so that from the next WSL restart /tmp is a directory on
+# fleet-runner-clean.timer, which weekly (and only while idle) clears old runner
+# work folders, oversized npm caches and merged local branches, and masks tmp.mount, so that from the next WSL restart /tmp is a directory on
 # the root disk instead of a RAM-backed tmpfs.
 set -euo pipefail
 
@@ -60,7 +61,7 @@ backing_fs() {
 }
 
 if [ "${1:-}" = "--uninstall" ]; then
-  systemctl disable --now fleet-idle-update.timer fleet-tmp-clean.timer 2>/dev/null || true
+  systemctl disable --now fleet-idle-update.timer fleet-tmp-clean.timer fleet-runner-clean.timer 2>/dev/null || true
   # Disabling the timer does not end a run already in progress. Wait for it
   # rather than stop it: killing apt mid-upgrade can leave dpkg half-configured.
   wait_for_updater
@@ -69,11 +70,14 @@ if [ "${1:-}" = "--uninstall" ]; then
         /usr/local/sbin/fleet-idle-update "$no_periodic" "$diag_rule" \
         /etc/systemd/system/fleet-tmp-clean.service \
         /etc/systemd/system/fleet-tmp-clean.timer \
-        /usr/local/sbin/fleet-tmp-clean
+        /usr/local/sbin/fleet-tmp-clean \
+        /etc/systemd/system/fleet-runner-clean.service \
+        /etc/systemd/system/fleet-runner-clean.timer \
+        /usr/local/sbin/fleet-runner-clean
   systemctl unmask "${apt_timers[@]}" tmp.mount
   systemctl daemon-reload
   systemctl enable --now "${apt_timers[@]}"
-  echo "removed; Ubuntu's apt timers are back. /etc/default/fleet-idle-update and /var/lib/fleet-idle-update were kept."
+  echo "removed; Ubuntu's apt timers are back. /etc/default/fleet-idle-update, /etc/default/fleet-runner-clean and /var/lib/fleet-idle-update were kept."
   echo "/tmp becomes a tmpfs again at the next WSL restart."
   exit 0
 fi
@@ -84,6 +88,11 @@ install -m 0644 "$here/fleet-idle-update.service" "$here/fleet-idle-update.timer
 # in /tmp; on 2026-10-03 they filled the host and every job failed with ENOSPC.
 install -m 0755 "$here/fleet-tmp-clean.sh" /usr/local/sbin/fleet-tmp-clean
 install -m 0644 "$here/fleet-tmp-clean.service" "$here/fleet-tmp-clean.timer" /etc/systemd/system/
+# Weekly, idle-only: old _work checkouts, oversized npm caches, merged local
+# branches in the checkouts, Docker leftovers.
+install -m 0755 "$here/fleet-runner-clean.sh" /usr/local/sbin/fleet-runner-clean
+install -m 0644 "$here/fleet-runner-clean.service" "$here/fleet-runner-clean.timer" /etc/systemd/system/
+[ -e /etc/default/fleet-runner-clean ] || install -m 0644 "$here/fleet-runner-clean.default" /etc/default/fleet-runner-clean
 [ -e /etc/default/fleet-idle-update ] || install -m 0644 "$here/fleet-idle-update.default" /etc/default/fleet-idle-update
 
 # Belt and braces: the masked timers are the trigger, these settings are what
@@ -113,7 +122,7 @@ systemctl mask "${apt_timers[@]}"
 # using it, stay as they are until then.
 systemctl mask tmp.mount
 systemctl daemon-reload
-systemctl enable --now fleet-idle-update.timer fleet-tmp-clean.timer
+systemctl enable --now fleet-idle-update.timer fleet-tmp-clean.timer fleet-runner-clean.timer
 
 echo "installed."
 # Plain assignments, so a failed lookup stops the script here (set -e) rather
@@ -126,4 +135,4 @@ else
   echo "/tmp is still a separate filesystem ($tmp_fs)."
   echo "It moves to the root disk at the next WSL restart; see runner-host/README.md for how to pause the fleet first."
 fi
-systemctl list-timers --no-pager --all 'fleet-idle-update*' 'fleet-tmp-clean*' '*apt*'
+systemctl list-timers --no-pager --all 'fleet-idle-update*' 'fleet-tmp-clean*' 'fleet-runner-clean*' '*apt*'

@@ -85,8 +85,49 @@ use:
 
 Each run logs how many it removed and kept, and how much space it freed.
 Settings go in `/etc/default/fleet-tmp-clean` (`TMP_DIR`, `PATTERNS`,
-`RETAIN_HOURS`). The shared npm cache in the runner user's home is left alone,
-because a running job may be using it.
+`RETAIN_HOURS`). The shared npm cache in the runner user's home is left alone
+here, because a running job may be using it; `fleet-runner-clean` (below) caps
+it, but only while the host is idle.
+
+## Weekly runner cleanup
+
+`fleet-runner-clean` runs once a week (`fleet-runner-clean.timer`, Sunday
+04:00 local, `Persistent=true`). It covers what the `/tmp` cleaner and the
+`_diag` tmpfiles rule do not:
+
+- `_work/_temp` entries older than `TEMP_RETAIN_DAYS` (3).
+- Checkouts under `_work` that nothing inside has changed for
+  `WORK_RETAIN_DAYS` (14). The runner clones them again on the next job.
+  Folders starting with `_` (`_tool`, `_actions`, `_temp`) are not treated as
+  checkouts.
+- Local branches in the checkouts that remain, only those `git branch -d`
+  accepts as merged. Never the checked-out branch, `main` or `master`. Git runs
+  as the checkout's owner with hooks disabled, because job code can write to
+  those folders and the script runs as root.
+- The runner user's `~/.npm/_cacache`, cleared when over `NPM_CACHE_MAX_MB`
+  (4096).
+- `docker system prune` for objects older than `DOCKER_UNTIL` (168h), if Docker
+  is installed. Never volumes.
+
+It runs only while no `Runner.Worker` exists. It polls for up to `WAIT_MINUTES`
+(120) for that moment, and checks again before each runner and each removal. If
+a job starts it stops where it is and exits 0; if the host is never idle it
+logs a WARNING and waits for next week. The runner has no drain mode, so this
+is the only safe moment.
+
+Settings go in `/etc/default/fleet-runner-clean`, created once by `install.sh`
+and never overwritten. Check it, and run it by hand:
+
+```bash
+systemctl list-timers fleet-runner-clean.timer
+journalctl -u fleet-runner-clean -n 20
+sudo systemctl start fleet-runner-clean.service   # waits for idle, then cleans
+```
+
+`node --test runner-host/runner-clean.test.js` runs the script against a
+scratch runner folder with backdated files and real git repositories. CI runs it
+with the other runner-host tests. The Mac runner is not covered by `install.sh`
+and is not cleaned by this.
 
 ### /tmp on the root disk
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Clean runner work folders, caches and local branches every week
+
+[Timer]
+# Sunday early morning, the quietest part of the week; the script still waits
+# for the host to be idle. Persistent: a host that was off then runs it on boot.
+OnCalendar=Sun 04:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

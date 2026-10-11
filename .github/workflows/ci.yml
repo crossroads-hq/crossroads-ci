@@ -87,6 +87,8 @@ jobs:
         run: shellcheck scripts/*.sh runner-host/*.sh
       - name: Runner host tests
         run: node --test runner-host/*.test.js
+      - name: Fleet script tests
+        run: node --test scripts/*.test.js
 
       - name: Governance profiles parse and render
         run: |
