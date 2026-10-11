@@ -69,12 +69,16 @@ seen_names=""
 #
 # The property column is not always `fleet-profile`: release tags target
 # `publishes-npm`, because publishing from a tag push is a different fact
-# about a repository than which protection tier it sits in.
+# about a repository than which protection tier it sits in. The merge queue
+# targets `merge-queue` for the same reason: a queue only works where the
+# gate also runs on `merge_group`, which no tier guarantees, so a repository
+# opts in once its CI does.
 profiles() {
   cat <<'PROFILES'
 governance/ruleset-full.json|Fleet — full protection|fleet-profile|full,full-tags|~DEFAULT_BRANCH
 governance/ruleset-minimal.json|Fleet — minimal protection|fleet-profile|minimal|~DEFAULT_BRANCH
 governance/tag-ruleset.json|Fleet — release tags|publishes-npm|true|refs/tags/v*
+governance/ruleset-merge-queue.json|Fleet — merge queue|merge-queue|true|~DEFAULT_BRANCH
 PROFILES
 }
 
