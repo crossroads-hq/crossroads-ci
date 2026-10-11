@@ -20,9 +20,10 @@ Here, the JSON profiles are the only copy.
 | `governance/ruleset-full.json` | Protection for repositories with a `PR Validation` gate. |
 | `governance/ruleset-minimal.json` | Protection for repositories with no CI — everything except the status check. Exists so "no CI yet" stops meaning "no protection at all". |
 | `governance/tag-ruleset.json` | `v*` release tags immutable, for repositories that publish from a tag push. |
+| `governance/ruleset-merge-queue.json` | A merge queue on the default branch: the one **repo-level** ruleset the fleet allows, on the repositories in `governance/merge-queue-repositories.txt` — see [Merge queue](#merge-queue). Added on top of the tier ruleset, not instead of it. |
 | `scripts/apply-fleet.sh` | Apply every profile. **Dry-run by default**; `APPLY=1` mutates. |
 | `scripts/verify-pins.sh` | Report which control-plane version each fleet repository pins, and what bumping would bring. Exit 1 on anything **uncheckable** — a pin naming a commit this repo lacks, a repository whose workflows could not be read, or a gate-requiring profile with no workflows. `STRICT=1` also fails on anything **not current** — behind, unpinned, or diverged from the base — or still addressing the pre-migration owner, which is counted separately so one pin cannot land in both totals. |
-| `scripts/verify-org-rulesets.sh` | Prove the three **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
+| `scripts/verify-org-rulesets.sh` | Prove the **org** rulesets still match the checked-in profiles: rules, parameters, enforcement, bypass, and what each targets. Exit 1 on drift or on anything uncheckable. Compares substance, not `name`/`conditions` — those differ from the profiles by migration, not drift. |
 | `scripts/audit-fleet-drift.sh` | Report what escapes org governance: unclassified or unlisted repositories, repo-level rulesets, merge settings, shadowed secrets, identity runner selectors, abandoned control-plane pins. Exit 1 on any MUST FIX. Runs weekly as `.github/workflows/fleet-drift-audit.yml`; see [Fleet drift audit](#fleet-drift-audit). |
 | `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
 | `scripts/resolve-conflicts.sh` | Resolve the conflicts on a `needs-rebase` PR with Claude, on demand and locally: merge the base into the head in a scratch worktree, validate, push a signed merge commit. Never force-pushes; never touches forks. See [Resolving conflicts](#resolving-conflicts). |
@@ -218,6 +219,47 @@ The workflow requests exactly these three, so the token fails to mint until
 the App holds all of them. Deliver both secrets through Infisical
 like the fleet-audit App's. Without them the run fails at its first step and
 says why.
+
+### Merge queue
+
+The stale-PR updater above is one answer to stranded branches; a merge queue
+is the other. GitHub tests each queued PR against the latest `main` (plus the
+PRs ahead of it) and merges in order, so a merge no longer strands every open
+PR and restarts its CI.
+
+GitHub offers the merge-queue rule only in **repository** rulesets ("This rule
+is not available for rulesets created at the organization level", Available
+rules for rulesets), so it cannot ride the org rulesets the rest of the fleet
+uses. It is the one declared exception to "no repo-level rulesets":
+
+- `governance/ruleset-merge-queue.json` is the profile, holding nothing but the
+  `merge_queue` rule. The tier ruleset still requires `PR Validation`, signed
+  commits and a pull request on top of it.
+- `governance/merge-queue-repositories.txt` lists the repositories that carry
+  it. `scripts/audit-fleet-drift.sh` accepts a repo-level ruleset only there,
+  only under the profile's name and only while `merge_queue` is its sole rule;
+  `scripts/verify-org-rulesets.sh` checks each listed repository carries it and
+  that it matches the profile.
+
+Opt-in, not a tier: a queued PR is validated by a `merge_group` event, so a
+repository whose `PR Validation` workflow does not run on `merge_group` would
+queue PRs that never merge. `crossroads-evolution` is the first (2026-10-11),
+after a day when each merge restarted CI on every open PR behind a three-runner
+queue.
+
+The parameters are sized for the self-hosted fleet: at most two queue groups
+build at once (`max_entries_to_build: 2`), so the queue cannot take every
+`fast` runner from ordinary PR validation; a group that has not reported in 60
+minutes is dropped, above the slowest measured `Validate`. `merge_method:
+MERGE` keeps the merge commits the fleet already uses, which GitHub signs, so
+`required_signatures` still holds.
+
+To add a repository: list it in `governance/merge-queue-repositories.txt` in a
+pull request, and once that merges create the ruleset (repository admin):
+
+```bash
+gh api -X POST repos/crossroads-hq/<repo>/rulesets --input governance/ruleset-merge-queue.json
+```
 
 ### Resolving conflicts
 

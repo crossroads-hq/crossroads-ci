@@ -214,15 +214,82 @@ else
 fi
 
 # ------------------------------------- 2. repo rulesets escape org governance
+mq_name="$(jq -r .name governance/ruleset-merge-queue.json)"
 say ""
 say "### Rulesets"
 for r in "${repos[@]}"; do
   # source_type filters out the INHERITED org ruleset, which this endpoint
   # also returns. Without the filter every repository looks like a violation.
   rs_raw="$(try "repos/$ORG/$r/rulesets")" || { info "\`$r\` rulesets unreadable — NOT checked for local overrides."; continue; }
-  local_rs="$(jq -r '[.[] | select(.source_type != "Organization") | .name] | join(", ")' <<<"$rs_raw" 2>/dev/null || true)"
-  [ -n "${local_rs:-}" ] && fail "\`$r\` carries repo-level ruleset(s): ${local_rs}. Rulesets are additive and the stricter rule wins, so this silently overrides the org."
+  # One exception, declared in governance/merge-queue-repositories.txt: GitHub
+  # offers the merge_queue rule only in repository rulesets. It is accepted
+  # under the profile's name and only while merge_queue is its ONLY rule, so
+  # the exception cannot carry any other rule past the org's.
+  while IFS=$'\t' read -r rs_id rs_name; do
+    [ -n "${rs_id:-}" ] || continue
+    if [ "$rs_name" = "$mq_name" ] && grep -qxF "$ORG/$r" <(grep -v '^#' governance/merge-queue-repositories.txt); then
+      rs_types="$(try "repos/$ORG/$r/rulesets/$rs_id" | jq -r '[.rules[].type] | sort | join(",")')" || {
+        fail "\`$r\` merge-queue ruleset unreadable — NOT checked for rules beyond merge_queue."
+        continue
+      }
+      if [ "$rs_types" = "merge_queue" ]; then
+        info "\`$r\` carries the declared merge-queue ruleset."
+      else
+        fail "\`$r\` merge-queue ruleset holds rules beyond merge_queue: ${rs_types}. Only the queue may live at repo level."
+      fi
+    else
+      fail "\`$r\` carries repo-level ruleset ${rs_name}. Rulesets are additive and the stricter rule wins, so this silently overrides the org."
+    fi
+  done < <(jq -r '.[] | select(.source_type != "Organization") | "\(.id)\t\(.name)"' <<<"$rs_raw" 2>/dev/null || true)
 done
+
+# ------------------------------- 2a. the declared merge queue is present
+# Section 2 only stops a repo-level ruleset from carrying more than the queue.
+# This checks the queue is THERE and works: one ruleset per listed repository,
+# under the profile's name, matching it in enforcement, target, refs and every
+# queue parameter. A deleted, disabled, retargeted or retuned queue leaves the
+# repository merging the old way with every other check still green.
+#
+# bypass_actors is compared only when the response carries it: GitHub omits
+# it unless the reader has write access, which the scheduled audit's read-only
+# token does not. scripts/verify-org-rulesets.sh, run with an admin token,
+# checks it in full.
+say ""
+say "### Merge queue"
+mq_want="$(jq -S '{target, enforcement, refs: .conditions.ref_name, rules: [.rules[] | {type, parameters}]}' governance/ruleset-merge-queue.json)"
+while IFS= read -r mq_repo; do
+  case "$mq_repo" in ''|'#'*) continue ;; esac
+  r="${mq_repo#"$ORG"/}"
+  # Paginated: a duplicate past the first page of 30 must still count.
+  mq_list="$(try --paginate --slurp "repos/$ORG/$r/rulesets" | jq '[.[][]]')" || { fail "\`$r\` rulesets unreadable — its declared merge queue was NOT checked."; continue; }
+  mq_ids="$(jq -r --arg n "$mq_name" '[.[] | select(.source_type == "Repository" and .name == $n) | .id] | join(" ")' <<<"$mq_list")"
+  case "$(wc -w <<<"$mq_ids" | tr -d ' ')" in
+    0) fail "\`$r\` is listed in governance/merge-queue-repositories.txt but has no ruleset named ${mq_name}: it has no merge queue."; continue ;;
+    1) ;;
+    *) fail "\`$r\` has more than one ruleset named ${mq_name} (${mq_ids})."; continue ;;
+  esac
+  mq_live="$(try "repos/$ORG/$r/rulesets/$mq_ids")" || { fail "\`$r\` merge-queue ruleset unreadable — NOT checked."; continue; }
+  mq_got="$(jq -S '{target, enforcement, refs: .conditions.ref_name, rules: [.rules[] | {type, parameters}]}' <<<"$mq_live")"
+  if [ "$mq_got" != "$mq_want" ]; then
+    fail "\`$r\` merge-queue ruleset differs from governance/ruleset-merge-queue.json (enforcement, target, refs or queue parameters)."
+  elif jq -e 'has("bypass_actors") and (.bypass_actors | length > 0)' <<<"$mq_live" >/dev/null; then
+    fail "\`$r\` merge-queue ruleset has bypass actors; the profile has none."
+  else
+    info "\`$r\` merge queue matches the profile."
+  fi
+  # The queue merges with the profile's method; a repository that disallows
+  # it queues PRs that can never merge, with the ruleset itself still exact.
+  # GraphQL, as in 2b, so the read-only audit token can see it.
+  mq_method="$(jq -r '.rules[] | select(.type == "merge_queue") | .parameters.merge_method' governance/ruleset-merge-queue.json)"
+  case "$mq_method" in
+    MERGE) mq_field=mergeCommitAllowed ;;
+    SQUASH) mq_field=squashMergeAllowed ;;
+    REBASE) mq_field=rebaseMergeAllowed ;;
+    *) fail "governance/ruleset-merge-queue.json has an unknown merge_method ${mq_method}."; continue ;;
+  esac
+  mq_allowed="$(try graphql -f query="{ repository(owner: \"$ORG\", name: \"$r\") { $mq_field } }" | jq -r ".data.repository.$mq_field")" || mq_allowed=unknown
+  [ "$mq_allowed" = "true" ] || fail "\`$r\` has $mq_field=${mq_allowed}, but its merge queue merges with ${mq_method}: queued PRs cannot merge."
+done < governance/merge-queue-repositories.txt
 
 # ---------------------------- 2b. merge settings on gate-enabled repositories
 # Repository settings rather than ruleset rules, so section 2 cannot see them.

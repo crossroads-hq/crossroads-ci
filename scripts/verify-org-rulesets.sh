@@ -216,6 +216,55 @@ done <<EOF
 $(profiles)
 EOF
 
+# The merge queue is the one REPO-level ruleset: GitHub does not offer the
+# merge_queue rule to organization rulesets. Each repository listed in
+# governance/merge-queue-repositories.txt must carry it, matching the profile
+# in substance and targeting the default branch with nothing carved out.
+mq_profile=governance/ruleset-merge-queue.json
+mq_name="$(jq -r .name "$mq_profile")"
+mq_ref="$(jq -r '.conditions.ref_name.include | join(",")' "$mq_profile")"
+while IFS= read -r mq_repo; do
+  case "$mq_repo" in ''|'#'*) continue ;; esac
+  echo "${mq_name} on ${mq_repo}  <-  ${mq_profile}"
+  rs_list="$(gh api --paginate --slurp "repos/$mq_repo/rulesets" 2>/dev/null | jq '[.[][]]')" || {
+    echo "  BROKEN: rulesets of $mq_repo could not be listed; NOT checked"
+    status=1
+    continue
+  }
+  mq_id="$(jq -r --arg n "$mq_name" '.[] | select(.source_type == "Repository" and .name == $n) | .id' <<<"$rs_list")"
+  if [ -z "$mq_id" ]; then
+    echo "  DIVERGED: no repository ruleset named '${mq_name}'; this repository has no merge queue"
+    status=1
+    continue
+  fi
+  mq_live="$(gh api "repos/$mq_repo/rulesets/$mq_id" 2>/dev/null)" || {
+    echo "  BROKEN: ruleset $mq_id could not be read; NOT checked"
+    status=1
+    continue
+  }
+  # GitHub omits bypass_actors from a repository ruleset unless the reader
+  # has write access, and canon would read the absence as "none". Unknown is
+  # not absence: refuse to compare rather than report a bypass list unseen.
+  if ! jq -e 'has("bypass_actors")' <<<"$mq_live" >/dev/null; then
+    echo "  BROKEN: ruleset $mq_id was returned without bypass_actors (the token lacks write access to $mq_repo); NOT checked"
+    status=1
+    continue
+  fi
+  diff_out="$(mktemp)"
+  if diff -u <(canon < "$mq_profile") <(canon <<<"$mq_live") > "$diff_out" 2>&1; then
+    echo "  ok: rules, parameters, enforcement and bypass match"
+  else
+    echo "  DIVERGED: live ruleset ${mq_id} differs from the profile:"
+    sed -e 's/^/    /' -e '1,2d' "$diff_out"
+    status=1
+  fi
+  rm -f "$diff_out"
+  got_ref="$(jq -r '[.conditions.ref_name.include[]?] | join(",")' <<<"$mq_live")"
+  [ "$got_ref" = "$mq_ref" ] || { echo "  DIVERGED: targets refs [${got_ref:-none}], expected [${mq_ref}]"; status=1; }
+  got_excl="$(jq -r '[.conditions.ref_name.exclude[]?] | join(",")' <<<"$mq_live")"
+  [ -z "$got_excl" ] || { echo "  DIVERGED: carves out [${got_excl}]"; status=1; }
+done < governance/merge-queue-repositories.txt
+
 # An org ruleset nobody reviewed protects the fleet just as hard as one that
 # was. Report anything live that this repository does not describe.
 while IFS= read -r live_name; do
