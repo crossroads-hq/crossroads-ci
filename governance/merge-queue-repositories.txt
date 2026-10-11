@@ -1,0 +1,10 @@
+# Repositories that carry the repo-level merge-queue ruleset
+# (governance/ruleset-merge-queue.json). GitHub offers the merge-queue rule
+# only in repository rulesets, never organization ones, so this is the one
+# repo-level ruleset the fleet allows: scripts/audit-fleet-drift.sh accepts it
+# here, under that profile's name and holding no rule but merge_queue, and
+# scripts/verify-org-rulesets.sh checks it matches the profile.
+#
+# List a repository only once its `PR Validation` workflow runs on
+# `merge_group`, or its queued PRs never merge.
+crossroads-hq/crossroads-evolution

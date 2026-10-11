@@ -214,14 +214,33 @@ else
 fi
 
 # ------------------------------------- 2. repo rulesets escape org governance
+mq_name="$(jq -r .name governance/ruleset-merge-queue.json)"
 say ""
 say "### Rulesets"
 for r in "${repos[@]}"; do
   # source_type filters out the INHERITED org ruleset, which this endpoint
   # also returns. Without the filter every repository looks like a violation.
   rs_raw="$(try "repos/$ORG/$r/rulesets")" || { info "\`$r\` rulesets unreadable — NOT checked for local overrides."; continue; }
-  local_rs="$(jq -r '[.[] | select(.source_type != "Organization") | .name] | join(", ")' <<<"$rs_raw" 2>/dev/null || true)"
-  [ -n "${local_rs:-}" ] && fail "\`$r\` carries repo-level ruleset(s): ${local_rs}. Rulesets are additive and the stricter rule wins, so this silently overrides the org."
+  # One exception, declared in governance/merge-queue-repositories.txt: GitHub
+  # offers the merge_queue rule only in repository rulesets. It is accepted
+  # under the profile's name and only while merge_queue is its ONLY rule, so
+  # the exception cannot carry any other rule past the org's.
+  while IFS=$'\t' read -r rs_id rs_name; do
+    [ -n "${rs_id:-}" ] || continue
+    if [ "$rs_name" = "$mq_name" ] && grep -qxF "$ORG/$r" <(grep -v '^#' governance/merge-queue-repositories.txt); then
+      rs_types="$(try "repos/$ORG/$r/rulesets/$rs_id" | jq -r '[.rules[].type] | sort | join(",")')" || {
+        fail "\`$r\` merge-queue ruleset unreadable — NOT checked for rules beyond merge_queue."
+        continue
+      }
+      if [ "$rs_types" = "merge_queue" ]; then
+        info "\`$r\` carries the declared merge-queue ruleset."
+      else
+        fail "\`$r\` merge-queue ruleset holds rules beyond merge_queue: ${rs_types}. Only the queue may live at repo level."
+      fi
+    else
+      fail "\`$r\` carries repo-level ruleset ${rs_name}. Rulesets are additive and the stricter rule wins, so this silently overrides the org."
+    fi
+  done < <(jq -r '.[] | select(.source_type != "Organization") | "\(.id)\t\(.name)"' <<<"$rs_raw" 2>/dev/null || true)
 done
 
 # ---------------------------- 2b. merge settings on gate-enabled repositories
