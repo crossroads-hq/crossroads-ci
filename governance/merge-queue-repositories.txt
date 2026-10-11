@@ -6,5 +6,10 @@
 # scripts/verify-org-rulesets.sh checks it matches the profile.
 #
 # List a repository only once its `PR Validation` workflow runs on
-# `merge_group`, or its queued PRs never merge.
-crossroads-hq/crossroads-evolution
+# `merge_group`, or its queued PRs never merge; and only if GitHub offers it a
+# queue at all: public repositories owned by an organization, or private ones
+# on GitHub Enterprise Cloud. crossroads-hq is on the Team plan, so a private
+# repository cannot have one: creating the ruleset on crossroads-evolution
+# (private) failed on 2026-10-11 with 422 "Invalid rule 'merge_queue'".
+#
+# Empty for now: no repository both needs a queue and can have one.
