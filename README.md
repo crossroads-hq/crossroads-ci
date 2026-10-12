@@ -239,8 +239,10 @@ deleted remote branch (after `git fetch --prune`) or merged into the default
 branch with commits of its own. `APPLY=1` removes them with `git worktree
 remove` and deletes the branch with `git branch -d`, never `-D`, so a
 squash-merged branch keeps its branch and is reported for you to check. It is
-run by hand; nothing schedules it. It needs only `git` and runs on macOS's
-bash 3.2.
+run by hand. `runner-host/install-macos.sh` can schedule a weekly **report-only**
+run of it, and the weekly runner cleanup, as launchd agents; see
+[runner-host/README.md](runner-host/README.md#on-a-mac). It needs only `git` and
+runs on macOS's bash 3.2.
 
 **Two GitHub Apps, one secret pair each**, delivered by Infisical like the
 others and never set by hand. Neither exists yet; both are created by an

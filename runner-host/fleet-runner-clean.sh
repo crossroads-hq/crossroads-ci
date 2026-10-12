@@ -26,13 +26,18 @@
 # The directories are written to by CI job code, and this runs as root, so git
 # is run as each checkout's owner with hooks disabled, never as root.
 #
-# Installed by install.sh with fleet-runner-clean.timer (weekly). Settings come
-# from /etc/default/fleet-runner-clean. Commands are overridable through the
-# environment so the logic can be tested without root or Docker
-# (runner-host/runner-clean.test.js).
+# Installed by install.sh with fleet-runner-clean.timer (weekly) on Linux, and by
+# install-macos.sh as a weekly launchd agent on a Mac. Settings come from
+# /etc/default/fleet-runner-clean on Linux and from the agent's plist on macOS.
+# Runs on bash 3.2. Commands are overridable through the environment so the
+# logic can be tested without root or Docker (runner-host/runner-clean.test.js).
 set -euo pipefail
 
-RUNNER_DIRS="${RUNNER_DIRS:-/home/*/actions-runner*}"
+case "$(uname -s)" in
+  Darwin) default_runner_dirs="/Users/*/actions-runner*" ;;
+  *)      default_runner_dirs="/home/*/actions-runner*" ;;
+esac
+RUNNER_DIRS="${RUNNER_DIRS:-$default_runner_dirs}"
 TEMP_RETAIN_DAYS="${TEMP_RETAIN_DAYS:-3}"
 WORK_RETAIN_DAYS="${WORK_RETAIN_DAYS:-14}"
 NPM_CACHE_MAX_MB="${NPM_CACHE_MAX_MB:-4096}"
@@ -67,14 +72,22 @@ summary() {
   log "removed $removed folder(s), pruned $branches local branch(es), cleared $caches cache(s); freed $((freed_kb / 1024)) MB"
 }
 
+# The owner's name: GNU stat on Linux, BSD stat on macOS.
+owner_of() { stat -c %U "$1" 2>/dev/null || stat -f %Su "$1"; }
+
 # Run a command as the owner of $1 when running as root, so a checkout's own
-# configuration is never read with root's privileges.
+# configuration is never read with root's privileges. A macOS LaunchAgent runs
+# as the user already, and takes the plain branch.
 as_owner() {
   local path="$1" user
   shift
-  user="$(stat -c %U "$path")"
+  user="$(owner_of "$path")"
   if [ "$(id -u)" -eq 0 ] && [ "$user" != root ]; then
-    runuser -u "$user" -- "$@"
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$user" -- "$@"
+    else
+      sudo -u "$user" -- "$@"
+    fi
   else
     "$@"
   fi

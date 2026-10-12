@@ -126,8 +126,35 @@ sudo systemctl start fleet-runner-clean.service   # waits for idle, then cleans
 
 `node --test runner-host/runner-clean.test.js` runs the script against a
 scratch runner folder with backdated files and real git repositories. CI runs it
-with the other runner-host tests. The Mac runner is not covered by `install.sh`
-and is not cleaned by this.
+with the other runner-host tests.
+
+### On a Mac
+
+`install.sh` is systemd-only, so a Mac runner uses `install-macos.sh` instead.
+It runs as you (no `sudo`) and installs two weekly launchd agents:
+
+```bash
+WORKTREE_ROOTS="$HOME/code" runner-host/install-macos.sh
+runner-host/install-macos.sh --uninstall
+```
+
+| Agent | When | What |
+|---|---|---|
+| `com.crossroads.fleet-runner-clean` | Sundays 04:00 | The same `fleet-runner-clean.sh` as above, with `/Users/*/actions-runner*` as the default `RUNNER_DIRS`. It deletes. |
+| `com.crossroads.clean-worktrees` | Sundays 05:00 | **Report only.** `scripts/clean-worktrees.sh` without `APPLY`, over `WORKTREE_ROOTS`. Read the log, then delete yourself with `APPLY=1`. Installed only if `WORKTREE_ROOTS` is set. |
+
+Settings for the runner cleanup (`WORK_RETAIN_DAYS`, `NPM_CACHE_MAX_MB`,
+`DOCKER=` to skip Docker, and so on) are read from the environment of the
+install run and stored in the agent's plist; re-run the installer to change them.
+The scripts are copied to `~/Library/Application Support/crossroads-ci`, so
+re-run it after pulling to update them. Logs are in `~/Library/Logs/crossroads-ci`.
+Try one now with `launchctl kickstart -k gui/$(id -u)/com.crossroads.fleet-runner-clean`.
+
+A launchd agent runs only while the Mac is on, and a missed Sunday runs when it
+wakes. macOS protects `~/Documents` and `~/Desktop`; the first run may need
+`/bin/bash` granted Full Disk Access, or `WORKTREE_ROOTS` pointed elsewhere.
+The installer's launchd and plist handling is tested only with stubs on Linux,
+so check the first run's log.
 
 ### /tmp on the root disk
 
