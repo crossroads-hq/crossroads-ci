@@ -50,12 +50,29 @@ jobs:
       # Delivered by Infisical (project crossroads-ci, Production, /ci). There
       # is no GITHUB_TOKEN fallback: it sees only this repository, and a run
       # that quietly covers one repository of eleven is worse than a red one.
+      #
+      # Neither secret set means the App has not been created yet: the run skips
+      # with a notice rather than going red every Sunday. Exactly one set is a
+      # half-finished setup, and that fails.
       - name: Check the branch-cleaner App credentials are configured
+        id: creds
         env:
           # Presence only; the values never reach this step.
           CLIENT_ID_SET: ${{ secrets.BRANCH_CLEANER_APP_CLIENT_ID != '' }}
           KEY_SET: ${{ secrets.BRANCH_CLEANER_APP_PRIVATE_KEY != '' }}
         run: |
+          if [ "$CLIENT_ID_SET" != "true" ] && [ "$KEY_SET" != "true" ]; then
+            {
+              echo "### Branch cleanup skipped"
+              echo
+              echo "The branch-cleaner GitHub App is not set up yet (no"
+              echo "BRANCH_CLEANER_APP_* Actions secrets). Nothing was listed or"
+              echo "deleted. See README, \"Weekly cleanup\"."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Branch cleanup skipped: the branch-cleaner App is not set up yet."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           missing=""
           [ "$CLIENT_ID_SET" = "true" ] || missing="$missing BRANCH_CLEANER_APP_CLIENT_ID"
           [ "$KEY_SET" = "true" ] || missing="$missing BRANCH_CLEANER_APP_PRIVATE_KEY"
@@ -63,12 +80,13 @@ jobs:
             {
               echo "### Branch cleanup did not run"
               echo
-              echo "Missing Actions secret(s):${missing}. They belong to the"
-              echo "branch-cleaner GitHub App. See README, \"Weekly cleanup\"."
+              echo "Missing Actions secret(s):${missing}. The other half is set, so the"
+              echo "setup is unfinished. See README, \"Weekly cleanup\"."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Missing Actions secret(s):${missing}. The branch cleanup cannot reach the fleet repositories without the branch-cleaner App."
+            echo "::error::Missing Actions secret(s):${missing}. The branch-cleaner App is only half configured."
             exit 1
           fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
 
       # No `repositories`: the token covers every repository the App is
       # installed on, and the script walks the roster. Contents write is what
@@ -76,6 +94,7 @@ jobs:
       # are still in use.
       - name: Mint a token for the cleanup
         id: cleaner-token
+        if: steps.creds.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.BRANCH_CLEANER_APP_CLIENT_ID }}
@@ -86,6 +105,7 @@ jobs:
           permission-metadata: read
 
       - name: Clean branches
+        if: steps.creds.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.cleaner-token.outputs.token }}
           APPLY: ${{ ((github.event_name == 'schedule' && vars.BRANCH_CLEANUP_APPLY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.apply)) && '1' || '0' }}

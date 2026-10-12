@@ -48,12 +48,29 @@ jobs:
       # A separate App from the branch cleaner: runner administration is a
       # much larger permission than deleting a branch, and should not ride on
       # the same key. Delivered by Infisical like the others.
+      #
+      # Neither secret set means the App has not been created yet: the run skips
+      # with a notice rather than going red every Sunday. Exactly one set is a
+      # half-finished setup, and that fails.
       - name: Check the runner-cleaner App credentials are configured
+        id: creds
         env:
           # Presence only; the values never reach this step.
           CLIENT_ID_SET: ${{ secrets.RUNNER_CLEANER_APP_CLIENT_ID != '' }}
           KEY_SET: ${{ secrets.RUNNER_CLEANER_APP_PRIVATE_KEY != '' }}
         run: |
+          if [ "$CLIENT_ID_SET" != "true" ] && [ "$KEY_SET" != "true" ]; then
+            {
+              echo "### Runner cleanup skipped"
+              echo
+              echo "The runner-cleaner GitHub App is not set up yet (no"
+              echo "RUNNER_CLEANER_APP_* Actions secrets). Nothing was listed or"
+              echo "removed. See README, \"Weekly cleanup\"."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Runner cleanup skipped: the runner-cleaner App is not set up yet."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           missing=""
           [ "$CLIENT_ID_SET" = "true" ] || missing="$missing RUNNER_CLEANER_APP_CLIENT_ID"
           [ "$KEY_SET" = "true" ] || missing="$missing RUNNER_CLEANER_APP_PRIVATE_KEY"
@@ -61,15 +78,17 @@ jobs:
             {
               echo "### Runner cleanup did not run"
               echo
-              echo "Missing Actions secret(s):${missing}. They belong to the"
-              echo "runner-cleaner GitHub App. See README, \"Weekly cleanup\"."
+              echo "Missing Actions secret(s):${missing}. The other half is set, so the"
+              echo "setup is unfinished. See README, \"Weekly cleanup\"."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Missing Actions secret(s):${missing}. The runner cleanup cannot see the fleet's runners without the runner-cleaner App."
+            echo "::error::Missing Actions secret(s):${missing}. The runner-cleaner App is only half configured."
             exit 1
           fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
 
       - name: Mint a token for the cleanup
         id: cleaner-token
+        if: steps.creds.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.RUNNER_CLEANER_APP_CLIENT_ID }}
@@ -80,6 +99,7 @@ jobs:
           permission-metadata: read
 
       - name: Clean runner registrations
+        if: steps.creds.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.cleaner-token.outputs.token }}
           APPLY: ${{ ((github.event_name == 'schedule' && vars.RUNNER_CLEANUP_APPLY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.apply)) && '1' || '0' }}

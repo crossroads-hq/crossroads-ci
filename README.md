@@ -254,8 +254,10 @@ organization owner:
 | `crossroads-ci-runner-cleaner` | `RUNNER_CLEANER_APP_CLIENT_ID`, `RUNNER_CLEANER_APP_PRIVATE_KEY` | Administration: write (repository), Self-hosted runners: write (organization), Metadata: read | The same repositories |
 
 They are separate because runner administration is a much larger permission
-than deleting a branch. Without the secrets a run fails with a message naming
-them; it never falls back to `GITHUB_TOKEN`, which sees only this repository.
+than deleting a branch. With neither secret of an App set, its workflow skips
+with a notice in the job summary, so nothing goes red before the App exists.
+With only one of the two set, it fails and names the missing one. It never falls
+back to `GITHUB_TOKEN`, which sees only this repository.
 The rulesets already forbid deleting `main`, and `v*` tags on `full+tags`
 repositories, as a second line of defence.
 
