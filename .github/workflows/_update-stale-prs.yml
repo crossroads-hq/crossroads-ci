@@ -33,17 +33,6 @@ on:
         type: string
         required: false
         default: main
-      runner-labels:
-        description: >-
-          JSON array of `runs-on` labels, as in _workflow-lint.yml. Defaults to
-          GitHub-hosted, deliberately: this job is silent when it cannot start,
-          and the self-hosted fleet being down is exactly when nobody would
-          notice. A PRIVATE caller pays hosted minutes (one short job per merge
-          to the base branch); it may pass self-hosted Linux labels instead.
-          The runner needs gh and jq.
-        type: string
-        required: false
-        default: '["ubuntu-latest"]'
     secrets:
       app-client-id:
         description: Client ID of the PR-updater GitHub App.
@@ -60,7 +49,15 @@ jobs:
     name: Update stale PRs
     # github.ref is the CALLER's ref in a reusable workflow.
     if: github.ref == format('refs/heads/{0}', inputs.base-branch)
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    # GitHub-hosted only, with no input to change it. This job receives the
+    # crossroads-ci-pr-updater App's private key, which can mint Contents, Pull
+    # requests and Workflows write tokens for every repository the App is
+    # installed on, so it must never run on the shared, persistent self-hosted
+    # fleet where pull-request code also runs (owner decision, 2026-10-12;
+    # hq#114). A private caller pays about one hosted minute per merge. Hosted
+    # also starts when the fleet is down, when a silent updater would go
+    # unnoticed. The image provides gh and jq.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     # One run per repository at a time, queued rather than cancelled: a run
     # cancelled mid-loop would leave PRs behind until the next merge.

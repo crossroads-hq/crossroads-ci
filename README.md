@@ -433,11 +433,11 @@ Per repository, that is all, once the owner has done the one-time setup:
 - The base branch is `main` unless the caller passes `with: { base-branch: ... }`.
   The job refuses to run for any other ref, so a manual run from a feature
   branch cannot use the token.
-- It runs on a GitHub-hosted runner by default, one short job per merge. A
-  private repository pays for those minutes; pass
-  `with: { runner-labels: '["self-hosted","Linux","X64","light"]' }` to use the
-  fleet instead, at the cost of silence when the fleet is down. The runner
-  needs `gh` and `jq`.
+- It always runs on a GitHub-hosted runner, one short job per merge, and has no
+  `runner-labels` input. A private repository pays about a minute per merge.
+  That is deliberate: the job holds the App's private key, which can write to
+  every repository the App is installed on, so it never runs on the shared
+  self-hosted fleet (owner decision, 2026-10-12).
 - Only repositories whose profile enforces strict up-to-date branches gain
   anything (`full` and `full+tags` in `governance/repositories.txt`); on
   `minimal` there is nothing to click.
