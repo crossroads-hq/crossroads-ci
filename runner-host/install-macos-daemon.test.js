@@ -12,9 +12,10 @@ const { spawnSync } = require("node:child_process");
 
 const SCRIPT = path.join(__dirname, "install-macos-daemon.sh");
 const LABEL = "com.crossroads.fleet-runner-clean.daemon";
-// The installer insists on root, as a LaunchDaemon install must; skip where the
-// test itself is not root and cannot honestly stand in for it.
-const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+// The installer insists on root, as a LaunchDaemon install must. A stand-in `id`
+// answers "root" to `id -u` so these tests run, and assert, as any user; every
+// other `id` call goes to the real one.
+const isRoot = true;
 
 function scratch(uname = "Darwin") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daemon-install-"));
@@ -23,7 +24,9 @@ function scratch(uname = "Darwin") {
   const calls = path.join(dir, "calls.log");
   const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   stub("uname", `echo ${uname}`);
-  stub("launchctl", `echo "launchctl $*" >> "${calls}"`);
+  stub("id", `if [ "$1" = "-u" ] && [ $# -eq 1 ]; then echo 0; else exec /usr/bin/id "$@"; fi`);
+  // `launchctl print` reports "not loaded", so the installer does not wait on bootout.
+  stub("launchctl", `echo "launchctl $*" >> "${calls}"\n[ "$1" = "print" ] && exit 1\nexit 0`);
   stub("plutil", "exit 0");
   stub("chown", `echo "chown $*" >> "${calls}"`);
   const root = path.join(dir, "root");
@@ -70,6 +73,20 @@ test("installs a root-owned script and a plist that runs as the runner user", { 
   assert.match(calls, /launchctl bootstrap system .*\.plist/);
   assert.match(calls, /chown root:wheel .*\.plist/, "launchd needs a root-owned plist");
   assert.match(calls, /chown root:wheel .*fleet-runner-clean/, "the runner user must not own the script that runs for it");
+  assert.match(calls, /chown root:wheel .*\/var\/log\/crossroads-ci\n/, "the log directory stays root-owned");
+  assert.match(calls, /chown nobody .*daemon\.log/, "only the log file belongs to the runner user");
+});
+
+test("warns when the default RUNNER_DIRS matches nothing", () => {
+  const r = scratch().run([], { RUNNER_USER: "nobody" });
+  assert.strictEqual(r.code, 0, r.out);
+  assert.match(r.out, /WARNING: nothing matches RUNNER_DIRS/);
+});
+
+test("does not wait on bootout when the job is not loaded", () => {
+  const started = Date.now();
+  scratch().run([], { RUNNER_USER: "nobody" });
+  assert.ok(Date.now() - started < 5000);
 });
 
 test("a custom RUNNER_DIRS replaces the default", { skip: !isRoot }, () => {

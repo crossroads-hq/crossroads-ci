@@ -163,11 +163,15 @@ sudo runner-host/install-macos-daemon.sh --uninstall
 
 It installs `com.crossroads.fleet-runner-clean.daemon` in `/Library/LaunchDaemons`
 (Sundays 04:00, same idle-only cleanup). The job runs as `RUNNER_USER`, never as
-root, and the script is installed root-owned under
-`/usr/local/libexec/crossroads-ci`, so a CI job cannot edit what runs for it.
-`RUNNER_DIRS` defaults to `/Users/<RUNNER_USER>/actions-runner*`; set it to
-override. Settings are read from the environment of the install run, as above.
-Logs: `/var/log/crossroads-ci`. Try it with
+root. The script and plist are installed root-owned so the reviewed script is not
+casually overwritten; that is hygiene, not a privilege boundary, since CI jobs
+already run as that user. `RUNNER_DIRS` defaults to `<RUNNER_USER's home>/actions-runner*`,
+read from the account record; the installer warns if that matches nothing, and
+`RUNNER_DIRS` overrides it. Settings are read from the environment of the install
+run, as above. Logs: `/var/log/crossroads-ci` (the directory is root-owned; only
+the log file belongs to the runner user). The Docker prune works only if the runner
+user can reach Docker; otherwise it logs a WARNING and the rest still runs.
+Re-running the installer after a pull replaces the loaded job. Try it with
 `sudo launchctl kickstart -k system/com.crossroads.fleet-runner-clean.daemon`.
 If you use the daemon, remove the per-user runner agent
 (`launchctl bootout gui/$(id -u)/com.crossroads.fleet-runner-clean`) so two jobs

@@ -13,10 +13,11 @@
 # /Library/LaunchDaemons runs without anyone logged in and can run as any user.
 #
 # The job runs as RUNNER_USER, never as root: it removes things in that user's
-# own folders and nothing else. The script itself is installed root-owned under
-# /usr/local/libexec/crossroads-ci, so the runner user, whose CI jobs run
-# arbitrary code, cannot edit what runs on its behalf weekly. Re-run after
-# pulling to update it.
+# own folders and nothing else. The script is installed root-owned under
+# /usr/local/libexec/crossroads-ci and the plist root-owned, so the reviewed
+# script is not casually overwritten. That is hygiene, not a privilege boundary:
+# CI jobs already run as RUNNER_USER and can do anything the script can. Re-run
+# after pulling to update it.
 #
 # Weekly, Sundays 04:00, idle-only: see fleet-runner-clean.sh. Settings
 # (WORK_RETAIN_DAYS, NPM_CACHE_MAX_MB, DOCKER=, ...) are read from the
@@ -56,10 +57,26 @@ xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 mkdir -p "$libexec" "$logs" "$(dirname "$plist")"
 install -m 0755 "$here/fleet-runner-clean.sh" "$libexec/fleet-runner-clean"
 chown root:wheel "$libexec" "$libexec/fleet-runner-clean"
-chown "$runner_user" "$logs"
+# The log DIRECTORY stays root-owned; only the log file belongs to the runner
+# user. Whoever opens the log file for launchd, the runner user can write its
+# contents but cannot replace it with a symlink to somewhere else.
+chown root:wheel "$logs"
+chmod 0755 "$logs"
+logfile="$logs/$label.log"
+touch "$logfile"
+chown "$runner_user" "$logfile"
+chmod 0640 "$logfile"
 
-# The default looks only in the runner user's own home; override with RUNNER_DIRS.
-RUNNER_DIRS="${RUNNER_DIRS-/Users/$runner_user/actions-runner*}"
+# The runner user's real home, not an assumed /Users/<name>: an account whose home
+# is on another volume would otherwise match nothing and fail silently.
+home="$(dscl . -read "/Users/$runner_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')" || home=""
+[ -n "$home" ] || home="/Users/$runner_user"
+# Override with RUNNER_DIRS.
+RUNNER_DIRS="${RUNNER_DIRS-$home/actions-runner*}"
+# shellcheck disable=SC2086 # RUNNER_DIRS is a list of globs, split on purpose
+if ! ls -d $RUNNER_DIRS >/dev/null 2>&1; then
+  echo "WARNING: nothing matches RUNNER_DIRS ($RUNNER_DIRS). The job will clean nothing until it does; reinstall with RUNNER_DIRS set." >&2
+fi
 env_xml=""
 for v in RUNNER_DIRS TEMP_RETAIN_DAYS WORK_RETAIN_DAYS NPM_CACHE_MAX_MB WAIT_MINUTES DOCKER DOCKER_UNTIL; do
   if [ -n "${!v+x}" ]; then
@@ -99,6 +116,12 @@ chown root:wheel "$plist"
 plutil -lint "$plist" >/dev/null
 
 launchctl bootout "system/$label" 2>/dev/null || true
+# bootout is asynchronous: bootstrapping at once, when the job is already loaded,
+# can fail with "Input/output error". Wait for it to be gone first.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  launchctl print "system/$label" >/dev/null 2>&1 || break
+  sleep 1
+done
 launchctl bootstrap system "$plist"
 echo "installed $label, running as $runner_user"
 echo

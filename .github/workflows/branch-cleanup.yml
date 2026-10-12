@@ -53,15 +53,18 @@ jobs:
       #
       # Neither secret set means the App has not been created yet: the run skips
       # with a notice rather than going red every Sunday. Exactly one set is a
-      # half-finished setup, and that fails.
+      # half-finished setup, and that fails. Once BRANCH_CLEANUP_APPLY is "true" the App
+      # is expected to exist, so missing secrets then fail too: a sync that
+      # empties them must not turn into weeks of green runs that clean nothing.
       - name: Check the branch-cleaner App credentials are configured
         id: creds
         env:
           # Presence only; the values never reach this step.
           CLIENT_ID_SET: ${{ secrets.BRANCH_CLEANER_APP_CLIENT_ID != '' }}
           KEY_SET: ${{ secrets.BRANCH_CLEANER_APP_PRIVATE_KEY != '' }}
+          APPLY_ENABLED: ${{ vars.BRANCH_CLEANUP_APPLY == 'true' }}
         run: |
-          if [ "$CLIENT_ID_SET" != "true" ] && [ "$KEY_SET" != "true" ]; then
+          if [ "$CLIENT_ID_SET" != "true" ] && [ "$KEY_SET" != "true" ] && [ "$APPLY_ENABLED" != "true" ]; then
             {
               echo "### Branch cleanup skipped"
               echo
