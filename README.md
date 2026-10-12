@@ -27,6 +27,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/audit-fleet-drift.sh` | Report what escapes org governance: unclassified or unlisted repositories, repo-level rulesets, merge settings, shadowed secrets, identity runner selectors, abandoned control-plane pins. Exit 1 on any MUST FIX. Runs weekly as `.github/workflows/fleet-drift-audit.yml`; see [Fleet drift audit](#fleet-drift-audit). |
 | `scripts/clean-branches.sh` | Delete finished remote branches across the roster: closed pull request with an unchanged head, never the default or an open-PR branch. **Dry-run by default**; `APPLY=1` mutates. Runs weekly as `.github/workflows/branch-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/clean-runners.sh` | List, and with `APPLY=1` remove, offline self-hosted runner registrations. Runs weekly as `.github/workflows/runner-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
+| `scripts/clean-worktrees.sh` | For a developer machine, not scheduled: find git worktrees whose remote branch is gone or whose branch is merged, and with `APPLY=1` remove them and their branches. Never touches a dirty, locked, detached, current or main worktree. **Dry-run by default**; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
 | `scripts/resolve-conflicts.sh` | Resolve the conflicts on a `needs-rebase` PR with Claude, on demand and locally: merge the base into the head in a scratch worktree, validate, push a signed merge commit. Never force-pushes; never touches forks. See [Resolving conflicts](#resolving-conflicts). |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
@@ -230,6 +231,16 @@ already removes a runner that has not connected for 14 days. The script never
 removes a busy runner, and treats a scope in which every runner is offline as
 "the fleet is down" and removes nothing from it. Keep `RUNNER_CLEANUP_APPLY`
 unset unless you want that anyway.
+
+**On your own machine.** None of the jobs above touch a developer's clones or
+worktrees. `scripts/clean-worktrees.sh ~/code` lists the worktrees under a
+folder that are finished with: clean, unlocked, on a branch, and either with a
+deleted remote branch (after `git fetch --prune`) or merged into the default
+branch with commits of its own. `APPLY=1` removes them with `git worktree
+remove` and deletes the branch with `git branch -d`, never `-D`, so a
+squash-merged branch keeps its branch and is reported for you to check. It is
+run by hand; nothing schedules it. It needs only `git` and runs on macOS's
+bash 3.2.
 
 **Two GitHub Apps, one secret pair each**, delivered by Infisical like the
 others and never set by hand. Neither exists yet; both are created by an
