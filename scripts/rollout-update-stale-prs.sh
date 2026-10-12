@@ -262,14 +262,21 @@ pause "Continue?"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
 stage "Install the App on $ROLL_REPO"
-# A successful updater run proves the App is installed here: its token mints.
+# A past successful updater run shows the App WAS installed here then; it does not
+# prove it still is (it may have been removed, or the selection changed, since),
+# so it never skips the check on its own: it only saves opening the page.
 ran=$(gh run list --repo "$ORG/$ROLL_REPO" --workflow update-stale-prs.yml --branch main \
-  --status success --limit 1 --json conclusion --jq 'length' 2>/dev/null || echo 0)
-if [[ "$ran" == "1" ]]; then
-  say "✓ A successful updater run exists in $ROLL_REPO, so the App is already installed there."
-  pause "Continue?"
-else
-  say "The App is installed on selected repositories only, so $ROLL_REPO has to be added."
+  --status success --limit 1 --json createdAt --jq '.[0].createdAt // empty' 2>/dev/null || true)
+need_install_page=1
+if [[ -n "$ran" ]]; then
+  say "A successful updater run on ${ran%%T*} shows the App was installed on $ROLL_REPO then."
+  note "That is history, not proof: the installation can change afterwards."
+  if confirm "Is $ROLL_REPO still on the App's installation page? (n opens it)"; then
+    need_install_page=0
+  fi
+fi
+if (( need_install_page )); then
+  say "The App is installed on selected repositories only, so $ROLL_REPO has to be listed."
   open_url "https://github.com/organizations/$ORG/settings/installations/$INSTALL_ID"
   step "Under 'Repository access' keep 'Only select repositories'."
   step "Open the repository picker and add: $ROLL_REPO"
@@ -288,8 +295,10 @@ for s in "${SECRETS[@]}"; do env_has_secret "$s" || need_values=1; done
 if (( need_values )); then
   # The Client ID is public, so take it from the App's public page: nothing to
   # copy or mistype.
+  pu_source="PU_CLIENT_ID in the environment"
   if [[ -z "${PU_CLIENT_ID:-}" ]]; then
     PU_CLIENT_ID=$(gh api "apps/$APP_SLUG" --jq .client_id 2>/dev/null || true)
+    pu_source="the App's public page"
   fi
   if [[ "${PU_CLIENT_ID:-}" != Iv* ]]; then
     open_url "https://github.com/organizations/$ORG/settings/apps/$APP_SLUG"
@@ -297,7 +306,7 @@ if (( need_values )); then
     ask PU_CLIENT_ID "Paste the Client ID:"
     [[ "$PU_CLIENT_ID" == Iv* ]] || { warn "That does not look like a Client ID (expected Iv...)."; exit 1; }
   else
-    say "✓ Client ID $PU_CLIENT_ID (from the App's public page)"
+    say "✓ Client ID $PU_CLIENT_ID (from $pu_source)"
   fi
   # The key: an explicit PU_PEM_PATH, else the newest file named for this App in
   # Downloads (confirmed), else ask.
