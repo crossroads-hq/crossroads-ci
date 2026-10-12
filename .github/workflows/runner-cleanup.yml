@@ -51,16 +51,18 @@ jobs:
       #
       # Neither secret set means the App has not been created yet: the run skips
       # with a notice rather than going red every Sunday. Exactly one set is a
-      # half-finished setup, and that fails. Once RUNNER_CLEANUP_APPLY is "true" the App
-      # is expected to exist, so missing secrets then fail too: a sync that
-      # empties them must not turn into weeks of green runs that clean nothing.
+      # half-finished setup, and that fails. Once RUNNER_CLEANUP_APPLY is "true", or a manual
+      # run ticks apply, the App is expected to exist, so missing secrets then fail
+      # too: a sync that empties them must not turn into weeks of green runs that
+      # clean nothing.
       - name: Check the runner-cleaner App credentials are configured
         id: creds
         env:
           # Presence only; the values never reach this step.
           CLIENT_ID_SET: ${{ secrets.RUNNER_CLEANER_APP_CLIENT_ID != '' }}
           KEY_SET: ${{ secrets.RUNNER_CLEANER_APP_PRIVATE_KEY != '' }}
-          APPLY_ENABLED: ${{ vars.RUNNER_CLEANUP_APPLY == 'true' }}
+          # Deletion is expected: the variable is on, or a manual run ticked apply.
+          APPLY_ENABLED: ${{ vars.RUNNER_CLEANUP_APPLY == 'true' || (github.event_name == 'workflow_dispatch' && inputs.apply) }}
         run: |
           if [ "$CLIENT_ID_SET" != "true" ] && [ "$KEY_SET" != "true" ] && [ "$APPLY_ENABLED" != "true" ]; then
             {

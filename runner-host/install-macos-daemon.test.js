@@ -15,7 +15,6 @@ const LABEL = "com.crossroads.fleet-runner-clean.daemon";
 // The installer insists on root, as a LaunchDaemon install must. A stand-in `id`
 // answers "root" to `id -u` so these tests run, and assert, as any user; every
 // other `id` call goes to the real one.
-const isRoot = true;
 
 function scratch(uname = "Darwin") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daemon-install-"));
@@ -42,13 +41,13 @@ function scratch(uname = "Darwin") {
   return { root, run, plist, callLog };
 }
 
-test("refuses off macOS", { skip: !isRoot }, () => {
+test("refuses off macOS", () => {
   const r = scratch("Linux").run([], { RUNNER_USER: "nobody" });
   assert.strictEqual(r.code, 1);
   assert.match(r.out, /for macOS/);
 });
 
-test("requires RUNNER_USER, and refuses root or an unknown user", { skip: !isRoot }, () => {
+test("requires RUNNER_USER, and refuses root or an unknown user", () => {
   const s = scratch();
   assert.match(s.run().out, /set RUNNER_USER/);
   assert.match(s.run([], { RUNNER_USER: "root" }).out, /must not be root/);
@@ -56,7 +55,7 @@ test("requires RUNNER_USER, and refuses root or an unknown user", { skip: !isRoo
   assert.match(s.run([], { RUNNER_USER: "bad;name" }).out, /characters/);
 });
 
-test("installs a root-owned script and a plist that runs as the runner user", { skip: !isRoot }, () => {
+test("installs a root-owned script and a plist that runs as the runner user", () => {
   const s = scratch();
   const r = s.run([], { RUNNER_USER: "nobody", WORK_RETAIN_DAYS: "21", DOCKER: "" });
   assert.strictEqual(r.code, 0, r.out);
@@ -89,13 +88,13 @@ test("does not wait on bootout when the job is not loaded", () => {
   assert.ok(Date.now() - started < 5000);
 });
 
-test("a custom RUNNER_DIRS replaces the default", { skip: !isRoot }, () => {
+test("a custom RUNNER_DIRS replaces the default", () => {
   const s = scratch();
   s.run([], { RUNNER_USER: "nobody", RUNNER_DIRS: "/Volumes/ci/actions-runner*" });
   assert.match(s.plist(), /<key>RUNNER_DIRS<\/key><string>\/Volumes\/ci\/actions-runner\*<\/string>/);
 });
 
-test("--uninstall boots the job out and removes what it installed", { skip: !isRoot }, () => {
+test("--uninstall boots the job out and removes what it installed", () => {
   const s = scratch();
   s.run([], { RUNNER_USER: "nobody" });
   const r = s.run(["--uninstall"]);
