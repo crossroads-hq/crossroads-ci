@@ -7,12 +7,24 @@
 # manual "Update branch" click. Auto-merge cannot get past that: it waits for
 # the checks, and the checks wait for the update. This is that click.
 #
-#   REPO=owner/name BASE=main scripts/update-stale-prs.sh
+#   REPO=owner/name BASE=main [MAX_UPDATES=2] scripts/update-stale-prs.sh
 #
 # Only a PR that has asked to merge is touched: open, not a draft, from this
 # repository (never a fork), based on BASE, with auto-merge enabled. Updating
 # every open PR re-runs CI and AI review on all of them after every merge, for
 # work nobody is waiting on.
+#
+# MAX_UPDATES (optional, a positive integer; unset keeps the behaviour above)
+# bounds how many of those PRs are kept current at once. With strict required
+# checks only one PR can merge before the next merge strands the rest again, so
+# updating every one of N PRs spends N validation runs to merge one. With the
+# cap, the PRs are taken oldest auto-merge first and only the first
+# MAX_UPDATES count; the rest wait for a later run, which every merge to the
+# base branch starts. A PR does not count, and is passed over, when a check on
+# its head has failed (a red PR at the front would otherwise stall everything
+# behind it) or when it conflicts with the base (it is flagged for its author as
+# below). A PR that is already current counts: it is in flight. A PR whose
+# checks cannot be read is treated as not failing.
 #
 # Must run with a token that can push, and NOT GITHUB_TOKEN: the update is a
 # push, and pushes made with GITHUB_TOKEN start no workflows, so the updated
@@ -34,9 +46,15 @@ set -euo pipefail
 : "${BASE:?BASE=<branch> is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 
+max_updates="${MAX_UPDATES:-}"
+if [ -n "$max_updates" ] && ! [[ "$max_updates" =~ ^[1-9][0-9]*$ ]]; then
+  echo "::error::MAX_UPDATES must be a positive integer or unset, not '$max_updates'."
+  exit 1
+fi
+
 limit=200
 prs=$(gh pr list --repo "$REPO" --state open --base "$BASE" --limit "$limit" \
-  --json number,isDraft,isCrossRepository,autoMergeRequest,headRefOid,labels)
+  --json number,isDraft,isCrossRepository,autoMergeRequest,headRefOid,labels,statusCheckRollup)
 
 # A truncated list is unknown state, not "nothing else is open".
 count=$(jq 'length' <<<"$prs")
@@ -74,7 +92,18 @@ This branch conflicts with \`$BASE\`, so it cannot be updated automatically and 
 
 failed=0
 updated=0
-while IFS=$'\t' read -r number sha labelled; do
+slots=0 # PRs counted against MAX_UPDATES
+while IFS=$'\t' read -r number sha labelled failing; do
+  if [ -n "$max_updates" ]; then
+    if [ "$slots" -ge "$max_updates" ]; then
+      echo "PR #$number: left for a later run ($max_updates PR(s) are ahead of it)."
+      continue
+    fi
+    if [ "$failing" = "true" ]; then
+      echo "PR #$number: passed over, a check on its head has failed."
+      continue
+    fi
+  fi
   # Ahead-or-level PRs have behind_by 0. A response we cannot read is unknown.
   if ! behind=$(gh api "repos/$REPO/compare/$BASE...$sha" --jq '.behind_by') ||
     ! [[ "$behind" =~ ^[0-9]+$ ]]; then
@@ -84,6 +113,7 @@ while IFS=$'\t' read -r number sha labelled; do
   fi
   if [ "$behind" -eq 0 ]; then
     [ "$labelled" = "true" ] && clear_label "$number"
+    slots=$((slots + 1))
     continue
   fi
 
@@ -92,6 +122,7 @@ while IFS=$'\t' read -r number sha labelled; do
     -f "expected_head_sha=$sha" 2>&1); then
     echo "PR #$number: updated ($behind commit(s) behind $BASE)."
     updated=$((updated + 1))
+    slots=$((slots + 1))
     [ "$labelled" = "true" ] && clear_label "$number"
   # gh prints "<message> (HTTP 422)": the message comes first, so match the
   # two independently. Only the two known 422s are benign; any other 422 is
@@ -101,13 +132,22 @@ while IFS=$'\t' read -r number sha labelled; do
     flag_conflict "$number" "$sha" || failed=1
   elif grep -qi 'head sha' <<<"$out" && grep -q 'HTTP 422' <<<"$out"; then
     echo "::warning::PR #$number: not updated, it changed during the run."
+    slots=$((slots + 1))
   else
     echo "::error::PR #$number: update failed: $out"
     failed=1
   fi
-done < <(jq -r '.[]
-  | select(.isDraft == false and .isCrossRepository == false and .autoMergeRequest != null)
-  | [.number, .headRefOid, (any(.labels[]; .name == "needs-rebase"))] | @tsv' <<<"$prs")
+done < <(jq -r '
+  # A check that has concluded badly. Cancelled and skipped runs are not
+  # failures, and a missing rollup is unknown, which counts as not failing.
+  def failing: any((.statusCheckRollup // [])[];
+    ((.conclusion // "") as $c | ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"] | index($c) != null)
+    or ((.state // "") as $s | ["FAILURE", "ERROR"] | index($s) != null));
+  [.[]
+    | select(.isDraft == false and .isCrossRepository == false and .autoMergeRequest != null)]
+  | sort_by([(.autoMergeRequest.enabledAt // "9999"), .number])
+  | .[]
+  | [.number, .headRefOid, (any(.labels[]; .name == "needs-rebase")), failing] | @tsv' <<<"$prs")
 
 echo "Updated $updated pull request(s) of $count open against $BASE."
 exit "$failed"
