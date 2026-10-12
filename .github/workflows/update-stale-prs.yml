@@ -34,6 +34,12 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The App's credentials live in this environment, whose deployment-branch
+    # policy is `main` only, so a workflow run from any other branch is refused
+    # them. An environment secret overrides a repository secret of the same
+    # name, so once the environment holds both, delete the repository-level
+    # copies. See the README, "Stale PR updates".
+    environment: pr-updater
     steps:
       # Script and workflow are read from main, the commit this run was
       # triggered for, never from a PR: this job holds a write-capable token.

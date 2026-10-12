@@ -13,6 +13,27 @@
 #   jobs:
 #     update:
 #       uses: crossroads-hq/crossroads-ci/.github/workflows/_update-stale-prs.yml@<sha>
+#       secrets: inherit
+#
+# The App's credentials belong in an ENVIRONMENT of the calling repository, not
+# in repository or organisation secrets. The job below declares the environment
+# (default `pr-updater`); give that environment a deployment-branch policy of
+# `main` only and keep PR_UPDATER_APP_CLIENT_ID and PR_UPDATER_APP_PRIVATE_KEY
+# there. A repository or organisation secret is readable by a workflow run from
+# ANY branch of that repository, so anyone or anything that can push a branch
+# could read the key, which can mint tokens for every installation of the App.
+# An environment secret is refused to every ref the policy does not allow, and
+# a job that does not name the environment sees nothing. `secrets: inherit` is
+# required: a called workflow receives environment secrets only through it, and
+# the calling job cannot name an environment itself. (Tested 2026-10-12 against
+# a throwaway repository: the main run saw the secret, a branch job naming the
+# environment was refused before running any step, and a branch job not naming
+# it saw an empty value.)
+#
+# The explicit `secrets:` mapping below still works for callers not yet
+# migrated, and the environment's secrets win when both exist. It leaves the
+# key readable from any branch, so migrate: see README, "Stale PR updates".
+#
 #       secrets:
 #         app-client-id: ${{ secrets.PR_UPDATER_APP_CLIENT_ID }}
 #         app-private-key: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY }}
@@ -33,13 +54,36 @@ on:
         type: string
         required: false
         default: main
+      environment:
+        description: >-
+          Environment of the calling repository that holds
+          PR_UPDATER_APP_CLIENT_ID and PR_UPDATER_APP_PRIVATE_KEY. Give it a
+          deployment-branch policy of `main` only. If it does not exist,
+          GitHub creates it empty on first use, with no policy and no secrets.
+        type: string
+        required: false
+        default: pr-updater
     secrets:
+      # Declared so the called workflow can read them, and optional because
+      # they arrive from the caller's ENVIRONMENT through `secrets: inherit`
+      # (the caller never names them). Tested 2026-10-12: declared, they still
+      # reach the main run and are still refused to a branch run.
+      PR_UPDATER_APP_CLIENT_ID:
+        description: Client ID of the PR-updater GitHub App, from the environment.
+        required: false
+      PR_UPDATER_APP_PRIVATE_KEY:
+        description: A private key of that App, the whole .pem, from the environment.
+        required: false
       app-client-id:
-        description: Client ID of the PR-updater GitHub App.
-        required: true
+        description: >-
+          Legacy. Client ID of the PR-updater GitHub App, passed explicitly.
+          Prefer `secrets: inherit` and the environment's own secrets.
+        required: false
       app-private-key:
-        description: A private key generated on that App, the whole .pem.
-        required: true
+        description: >-
+          Legacy. A private key generated on that App, the whole .pem. Passing
+          it leaves it readable from any branch of the caller.
+        required: false
 
 permissions:
   contents: read
@@ -59,6 +103,9 @@ jobs:
     # unnoticed. The image provides gh and jq.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Where the App's credentials live. With a deployment-branch policy of
+    # `main`, this job is refused on any other ref before it runs a step.
+    environment: ${{ inputs.environment }}
     # One run per repository at a time, queued rather than cancelled: a run
     # cancelled mid-loop would leave PRs behind until the next merge.
     concurrency:
@@ -68,14 +115,14 @@ jobs:
       - name: Check the App credentials are configured
         env:
           # Presence only; the values never reach this step.
-          CLIENT_ID_SET: ${{ secrets.app-client-id != '' }}
-          KEY_SET: ${{ secrets.app-private-key != '' }}
+          CLIENT_ID_SET: ${{ secrets.PR_UPDATER_APP_CLIENT_ID != '' || secrets.app-client-id != '' }}
+          KEY_SET: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY != '' || secrets.app-private-key != '' }}
         run: |
           missing=""
           [ "$CLIENT_ID_SET" = "true" ] || missing="$missing app-client-id"
           [ "$KEY_SET" = "true" ] || missing="$missing app-private-key"
           if [ -n "$missing" ]; then
-            echo "::error::Missing secret(s) passed to the updater:${missing}. GITHUB_TOKEN cannot stand in: its pushes start no workflows, so updated PRs would never re-run PR Validation. See crossroads-ci README, \"Stale PR updates\"."
+            echo "::error::Missing credential(s) for the updater:${missing}. Put PR_UPDATER_APP_CLIENT_ID and PR_UPDATER_APP_PRIVATE_KEY in the caller's environment and call with secrets: inherit. GITHUB_TOKEN cannot stand in: its pushes start no workflows, so updated PRs would never re-run PR Validation. See crossroads-ci README, \"Stale PR updates\"."
             exit 1
           fi
 
@@ -87,8 +134,8 @@ jobs:
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.app-client-id }}
-          private-key: ${{ secrets.app-private-key }}
+          client-id: ${{ secrets.PR_UPDATER_APP_CLIENT_ID || secrets.app-client-id }}
+          private-key: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY || secrets.app-private-key }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
