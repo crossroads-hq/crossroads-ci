@@ -220,6 +220,14 @@ the App holds all of them. Deliver both secrets through Infisical
 like the fleet-audit App's. Without them the run fails at its first step and
 says why.
 
+The App's slug, `crossroads-ci-pr-updater`, is also named in `_ai-review.yml`
+as the one bot the Claude fallback reviewer accepts (`allowed_bots`). The
+action rejects any other bot as a non-human actor, and a re-run keeps the
+original actor, so without that entry every updater push would leave its head
+without the fallback review. If the App is renamed or recreated under another
+slug, change that entry and the test beside it, then bump the `_ai-review.yml`
+pin in the consumers.
+
 ### Merge queue
 
 The stale-PR updater above is one answer to stranded branches; a merge queue
@@ -243,9 +251,15 @@ uses. It is the one declared exception to "no repo-level rulesets":
 
 Opt-in, not a tier: a queued PR is validated by a `merge_group` event, so a
 repository whose `PR Validation` workflow does not run on `merge_group` would
-queue PRs that never merge. `crossroads-evolution` is the first (2026-10-11),
-after a day when each merge restarted CI on every open PR behind a three-runner
-queue.
+queue PRs that never merge.
+
+**Not available to private repositories on the Team plan.** GitHub offers merge
+queues to public repositories owned by an organization and to private ones on
+GitHub Enterprise Cloud; `crossroads-hq` is on Team. `crossroads-evolution`
+(private) was to be the first, and creating its ruleset failed on 2026-10-11
+with 422 "Invalid rule 'merge_queue'", so the list is empty. The profile and
+the checks stay, ready for a public repository or a plan change; until then
+the [stale-PR updater](#stale-pr-updates) is the answer for private ones.
 
 The parameters are sized for the self-hosted fleet: at most two queue groups
 build at once (`max_entries_to_build: 2`), so the queue cannot take every

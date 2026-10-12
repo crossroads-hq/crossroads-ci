@@ -179,3 +179,70 @@ test("the detector pin is a main commit that reviews guidance-only changes", () 
     /uses: crossroads-hq\/crossroads-ci\/actions\/detect-reviewable@36410e8c5f83a0f3b172191852223c0ec7bc3956 # main after #68 and #71/
   );
 });
+
+// The PR updater (_update-stale-prs.yml) pushes as this GitHub App, so the
+// pull_request runs it starts have `github.actor` == "<slug>[bot]". Checked
+// against the API: `gh api apps/crossroads-ci-pr-updater` (owned by
+// crossroads-hq) and `gh api users/crossroads-ci-pr-updater%5Bbot%5D` (type
+// Bot); no user or organization of the bare name exists.
+const PR_UPDATER_SLUG = "crossroads-ci-pr-updater";
+
+// claude-code-action refuses a non-User actor that `allowed_bots` does not
+// list (src/github/validation/actor.ts, at the SHA the workflow pins): the
+// list is comma-separated, entries are lowercased with a trailing `[bot]`
+// removed, and so is the actor. Mirrored here so the test asks the question
+// that matters -- would THIS actor be admitted? -- rather than only comparing
+// strings. Re-read actor.ts when the action's pin moves.
+function actionAdmitsBot(actor, allowedBots) {
+  const trimmed = allowedBots.trim();
+  if (trimmed === "*") return true;
+  if (!trimmed) return false;
+  const normalize = (name) => name.trim().toLowerCase().replace(/\[bot\]$/, "");
+  return trimmed.split(",").map(normalize).filter(Boolean).includes(normalize(actor));
+}
+
+function claudeReviewAllowedBots() {
+  const stepStart = workflow.indexOf("uses: anthropics/claude-code-action@");
+  assert.notStrictEqual(stepStart, -1, "the claude-code-action step is missing");
+  const nextStep = workflow.indexOf("\n      - name:", stepStart);
+  const step = workflow.slice(stepStart, nextStep === -1 ? undefined : nextStep);
+  // Ten spaces: a `with:` input, not text inside the prompt block below it.
+  const inputs = [...step.matchAll(/^ {10}allowed_bots:[ \t]*(.*)$/gm)];
+  assert.strictEqual(
+    inputs.length,
+    1,
+    "the Claude review step must set allowed_bots exactly once; without it the action rejects the PR updater's pushes as a non-human actor (crossroads-ci#102)"
+  );
+  return inputs[0][1].replace(/\s+#.*$/, "").replace(/^(['"])(.*)\1$/, "$2");
+}
+
+test("the Claude review admits the PR updater, whose pushes would otherwise leave the head unreviewed", () => {
+  // crossroads-ci#102: without this, the action fails with "Workflow initiated
+  // by non-human actor: crossroads-ci-pr-updater (type: Bot)", and a re-run
+  // keeps the original actor, so only a person's push could recover it.
+  const allowedBots = claudeReviewAllowedBots();
+  assert.ok(
+    actionAdmitsBot(`${PR_UPDATER_SLUG}[bot]`, allowedBots),
+    `allowed_bots is ${JSON.stringify(allowedBots)}, which does not admit ${PR_UPDATER_SLUG}[bot]`
+  );
+});
+
+test("the Claude review admits the PR updater and no other bot", () => {
+  // The reviewer holds pull-requests: write, and the action checks a listed
+  // bot by name only. '*' would let any GitHub App that can start a run in
+  // this repository drive the reviewer.
+  const allowedBots = claudeReviewAllowedBots();
+  assert.notStrictEqual(allowedBots.trim(), "*", "allowed_bots must not be '*'");
+  const entries = allowedBots.split(",").map((entry) => entry.trim().toLowerCase().replace(/\[bot\]$/, ""));
+  assert.deepStrictEqual(entries, [PR_UPDATER_SLUG]);
+  for (const actor of [
+    "dependabot[bot]",
+    "github-actions[bot]",
+    "claude[bot]",
+    "copilot",
+    `${PR_UPDATER_SLUG}-fork[bot]`,
+    `not-${PR_UPDATER_SLUG}[bot]`
+  ]) {
+    assert.strictEqual(actionAdmitsBot(actor, allowedBots), false, `${actor} must not be admitted`);
+  }
+});
