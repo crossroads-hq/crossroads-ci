@@ -26,9 +26,14 @@
 # The directories are written to by CI job code, and this runs as root, so git
 # is run as each checkout's owner with hooks disabled, never as root.
 #
-# Installed by install.sh with fleet-runner-clean.timer (weekly) on Linux, and by
-# install-macos.sh as a weekly launchd agent on a Mac. Settings come from
-# /etc/default/fleet-runner-clean on Linux and from the agent's plist on macOS.
+# Installed by install.sh with fleet-runner-clean.timer (weekly) on Linux, as root.
+# On a Mac it runs as an unprivileged user: by install-macos.sh as a per-user
+# launchd agent, or by install-macos-daemon.sh as a system LaunchDaemon that
+# runs as the runner's own user (needed when the runners live under another
+# account). Run unprivileged, it can only remove what that user owns, and the
+# Docker prune needs that user to be able to reach Docker; a failed prune is
+# logged as a WARNING and nothing else is affected. Settings come from
+# /etc/default/fleet-runner-clean on Linux and from the plist on macOS.
 # Runs on bash 3.2. Commands are overridable through the environment so the
 # logic can be tested without root or Docker (runner-host/runner-clean.test.js).
 set -euo pipefail
