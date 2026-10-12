@@ -158,7 +158,7 @@ jobs:
             echo "::error::osv-scanner is pinned as a Linux x86-64 binary, but this runner is ${RUNNER_OS}/${RUNNER_ARCH}. Name Linux and X64 in runner-labels; a capability label such as fast also matches the macOS runners."
             exit 1
           fi
-          curl -sSfL --retry 3 -o "${RUNNER_TEMP}/osv-scanner" \
+          curl -sSfL --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/osv-scanner" \
             "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
           echo "${OSV_SHA256}  ${RUNNER_TEMP}/osv-scanner" | sha256sum -c -
           chmod +x "${RUNNER_TEMP}/osv-scanner"
@@ -237,7 +237,7 @@ jobs:
             echo "::error::gitleaks is pinned as a Linux x86-64 binary, but this runner is ${RUNNER_OS}/${RUNNER_ARCH}. Name Linux and X64 in runner-labels; a capability label such as fast also matches the macOS runners."
             exit 1
           fi
-          curl -sSfL --retry 3 -o "${RUNNER_TEMP}/gitleaks.tar.gz" \
+          curl -sSfL --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/gitleaks.tar.gz" \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           (cd "${RUNNER_TEMP}" \
             && echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c - \

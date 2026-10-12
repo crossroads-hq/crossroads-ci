@@ -56,6 +56,9 @@ jobs:
       # dropping them would weaken the lint without a sound. pyflakes is pure
       # Python, so it runs from its pinned wheel through a two-line wrapper:
       # no pip, no venv, only the runner's python3.
+      # `--retry-all-errors` because plain `--retry` does not retry an HTTP
+      # error such as a rate-limited release download (exit 22), which failed
+      # crossroads-evolution#422 once while the same step passed elsewhere.
       # Checksums are the publishers' own: actionlint's checksums.txt,
       # GitHub's release-asset digest for shellcheck and zizmor, and PyPI's
       # for the pyflakes wheel.
@@ -74,13 +77,13 @@ jobs:
           bin="${RUNNER_TEMP}/workflow-lint-bin"
           mkdir -p "$bin"
           cd "${RUNNER_TEMP}"
-          curl -sSfL --retry 3 -o actionlint.tar.gz \
+          curl -sSfL --retry 3 --retry-all-errors -o actionlint.tar.gz \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -sSfL --retry 3 -o shellcheck.tar.gz \
+          curl -sSfL --retry 3 --retry-all-errors -o shellcheck.tar.gz \
             "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
-          curl -sSfL --retry 3 -o zizmor.tar.gz \
+          curl -sSfL --retry 3 --retry-all-errors -o zizmor.tar.gz \
             "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
-          curl -sSfL --retry 3 -o "$bin/pyflakes.whl" "$PYFLAKES_WHEEL"
+          curl -sSfL --retry 3 --retry-all-errors -o "$bin/pyflakes.whl" "$PYFLAKES_WHEEL"
           sha256sum -c - <<SUMS
           ${ACTIONLINT_SHA256}  actionlint.tar.gz
           ${SHELLCHECK_SHA256}  shellcheck.tar.gz
