@@ -64,6 +64,16 @@ on:
         required: false
         default: pr-updater
     secrets:
+      # Declared so the called workflow can read them, and optional because
+      # they arrive from the caller's ENVIRONMENT through `secrets: inherit`
+      # (the caller never names them). Tested 2026-10-12: declared, they still
+      # reach the main run and are still refused to a branch run.
+      PR_UPDATER_APP_CLIENT_ID:
+        description: Client ID of the PR-updater GitHub App, from the environment.
+        required: false
+      PR_UPDATER_APP_PRIVATE_KEY:
+        description: A private key of that App, the whole .pem, from the environment.
+        required: false
       app-client-id:
         description: >-
           Legacy. Client ID of the PR-updater GitHub App, passed explicitly.
