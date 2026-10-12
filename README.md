@@ -275,10 +275,44 @@ It authenticates as a GitHub App, not `GITHUB_TOKEN`: a push made with
 `GITHUB_TOKEN` starts no workflows, so the updated PR would never re-run
 `PR Validation`.
 
-| Secret | Kind | Source |
+| Secret (in the environment `pr-updater`) | Kind | Source |
 | --- | --- | --- |
 | `PR_UPDATER_APP_CLIENT_ID` | config | The App's Client ID |
 | `PR_UPDATER_APP_PRIVATE_KEY` | credential | A private key generated on the App, the whole `.pem` |
+
+#### Where the credentials live, and why
+
+They live in an **environment** of each repository, named `pr-updater`, whose
+deployment-branch policy allows `main` only. Not in repository or organisation
+secrets. A repository or organisation secret is readable by a workflow run from
+**any branch** of the repository: anyone, or any integration, that can push a
+branch can add a workflow that reads it, and no merge to `main` is needed. This
+App's key can mint Contents, Pull requests and Workflows write tokens for every
+repository the App is installed on, so reading it in one repository would be
+write access to all of them. The people and integrations who can push a branch
+today are the owner and the AI integrations that read untrusted text (the
+`claude` and Codex GitHub Apps, the Copilot agent), which is why this matters
+(found by the Codex security review of crossroads-os#69).
+
+An environment secret is withheld from every ref its policy does not allow:
+
+- A job that names the environment on a branch is refused before it runs a
+  step. This holds for a job that calls the shared workflow, since that job
+  names the environment too.
+- A job that does not name the environment sees an empty value.
+- The `main` run reads it normally.
+
+This was tested on 2026-10-12 in a throwaway repository with a dummy secret, one
+case each. One requirement came out of it: a called workflow receives
+environment secrets only if the caller passes **`secrets: inherit`**; the
+calling job cannot name an environment itself, and without `inherit` the
+called job saw an empty value.
+
+What it does not stop: anyone who can change `main` (a pull request, signed
+commits and a green `PR Validation` are required) or who administers the
+repository and can edit the environment. The environment's secrets are written
+by hand today (see the inventory in crossroads-os); an Infisical `GH env` sync
+per repository is the planned owner, as for the other environment secrets.
 
 App setup (owner action): create a GitHub App owned by `crossroads-hq`, no
 webhook, with Repository permissions **Contents: write**, **Pull requests: write**
@@ -286,9 +320,9 @@ and **Workflows: write**, installed on this repository. Workflows is needed
 because the merge `update-branch` creates carries any `.github/workflows`
 change from `main`, and GitHub rejects such a commit from an App without it.
 The workflow requests exactly these three, so the token fails to mint until
-the App holds all of them. Deliver both secrets through Infisical
-like the fleet-audit App's. Without them the run fails at its first step and
-says why.
+the App holds all of them. Put both secrets in each repository's `pr-updater`
+environment (below); the fleet-audit App's are delivered through Infisical and
+these should be too. Without them the run fails at its first step and says why.
 
 The App's slug, `crossroads-ci-pr-updater`, is also named in `_ai-review.yml`
 as the one bot the Claude fallback reviewer accepts (`allowed_bots`). The
@@ -420,16 +454,29 @@ permissions:
 jobs:
   update:
     uses: crossroads-hq/crossroads-ci/.github/workflows/_update-stale-prs.yml@<commit-sha>
-    secrets:
-      app-client-id: ${{ secrets.PR_UPDATER_APP_CLIENT_ID }}
-      app-private-key: ${{ secrets.PR_UPDATER_APP_PRIVATE_KEY }}
+    secrets: inherit
 ```
 
-Per repository, that is all, once the owner has done the one-time setup:
+`secrets: inherit` is required, and it is safe only because the credentials are
+in an environment (see above): it passes the caller's repository and
+organisation secrets to the shared workflow, so none should hold the App's key.
+Per repository, once the owner has done the one-time setup:
 
-- Install the App on the repository, and make the two secrets visible to it.
-  Set them at **org level** (selected repositories) rather than per repository;
-  `crossroads-ci` itself has them at repository level today.
+- Install the App on the repository.
+- Create the environment with a `main`-only deployment-branch policy, then put
+  the two secrets in it (the second step is the owner's):
+
+  ```bash
+  gh api -X PUT repos/crossroads-hq/<repo>/environments/pr-updater --input - <<'JSON'
+  {"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
+  JSON
+  gh api -X POST repos/crossroads-hq/<repo>/environments/pr-updater/deployment-branch-policies -f name=main -f type=branch
+  gh secret set PR_UPDATER_APP_CLIENT_ID --env pr-updater --repo crossroads-hq/<repo>
+  gh secret set PR_UPDATER_APP_PRIVATE_KEY --env pr-updater --repo crossroads-hq/<repo> < the-key.pem
+  ```
+
+  `scripts/rollout-update-stale-prs.sh` does all of it. Do not use organisation
+  or repository secrets for these two names: that is the exposure above.
 - The base branch is `main` unless the caller passes `with: { base-branch: ... }`.
   The job refuses to run for any other ref, so a manual run from a feature
   branch cannot use the token.
@@ -446,6 +493,33 @@ The reusable workflow runs the script from this repository through
 `actions/update-stale-prs`, pinned by SHA inside it. After changing
 `scripts/update-stale-prs.sh`, bump that pin to a commit on `main`; callers then
 pick the new script up by bumping their own pin of the workflow.
+
+#### Migrating a caller from repository or organisation secrets
+
+The shared workflow still accepts the old explicit `secrets:` mapping, so
+nothing broke when environments were added, and the environment's secrets win
+when both exist. The old way leaves the key readable from any branch, so each
+consumer migrates, in this order:
+
+1. This change merges (compatible; no caller has to change yet).
+2. Per repository: create the `pr-updater` environment with the `main`-only
+   policy and put the two secrets in it (the owner; the wizard does it).
+3. Per repository: a pull request that bumps the caller's pin to a commit
+   containing this change, replaces the `secrets:` mapping with
+   `secrets: inherit`, and drops any `with: runner-labels`, an input that no
+   longer exists (the updater is hosted-only).
+4. After that merges and a run on `main` succeeds, remove the repository from
+   the organisation secrets' visibility, and delete the repository-level copies
+   where they exist.
+5. When no repository is left on them, delete the two organisation secrets.
+
+Consumers: `crossroads-agent-system`, `crossroads-ui`, `hq` and
+`crossroads-evolution` (callers merged, pinned to an older commit; evolution's
+passes `runner-labels`), `crossroads-os` (crossroads-os#69, open), and
+`crossroads-ci` itself, whose own workflow now names the environment: set its
+secrets there, then delete its repository-level copies. An environment secret
+overrides a repository secret of the same name, so deleting them is cleanup, but
+until it is done the old key stays readable from any branch.
 
 ## Rules that keep this honest
 
