@@ -150,6 +150,34 @@ The scripts are copied to `~/Library/Application Support/crossroads-ci`, so
 re-run it after pulling to update them. Logs are in `~/Library/Logs/crossroads-ci`.
 Try one now with `launchctl kickstart -k gui/$(id -u)/com.crossroads.fleet-runner-clean`.
 
+**Runners under another macOS user.** If the runners live in another account's
+home, for example `/Users/ghrunner/actions-runner-1`, the per-user agent above can
+read those folders through the `staff` group but cannot delete in them, so its
+runner cleanup does nothing. Use the system daemon instead, which runs as the
+runner user with nobody logged in:
+
+```bash
+sudo RUNNER_USER=ghrunner runner-host/install-macos-daemon.sh
+sudo runner-host/install-macos-daemon.sh --uninstall
+```
+
+It installs `com.crossroads.fleet-runner-clean.daemon` in `/Library/LaunchDaemons`
+(Sundays 04:00, same idle-only cleanup). The job runs as `RUNNER_USER`, never as
+root. The script and plist are installed root-owned so the reviewed script is not
+casually overwritten; that is hygiene, not a privilege boundary, since CI jobs
+already run as that user. `RUNNER_DIRS` defaults to `<RUNNER_USER's home>/actions-runner*`,
+read from the account record; the installer warns if that matches nothing, and
+`RUNNER_DIRS` overrides it. Settings are read from the environment of the install
+run, as above. Logs: `/var/log/crossroads-ci` (the directory is root-owned; only
+the log file belongs to the runner user). The Docker prune works only if the runner
+user can reach Docker; otherwise it logs a WARNING and the rest still runs.
+Re-running the installer after a pull replaces the loaded job. Try it with
+`sudo launchctl kickstart -k system/com.crossroads.fleet-runner-clean.daemon`.
+If you use the daemon, remove the per-user runner agent
+(`launchctl bootout gui/$(id -u)/com.crossroads.fleet-runner-clean`) so two jobs
+do not clean the same folders. The daemon's tests use stand-ins on Linux; check
+the first real run's log.
+
 A launchd agent runs only while the Mac is on, and a missed Sunday runs when it
 wakes. macOS protects `~/Documents` and `~/Desktop`; the first run may need
 `/bin/bash` granted Full Disk Access, or `WORKTREE_ROOTS` pointed elsewhere.
