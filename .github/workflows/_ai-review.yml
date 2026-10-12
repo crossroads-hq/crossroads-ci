@@ -777,7 +777,7 @@ jobs:
         # rather than seconds; re-measure before raising this default or the
         # Codex wait.
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029 # v1.0.239
+        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1.0.247
         with:
           anthropic_api_key: ${{ secrets.anthropic-api-key }}
           # Only when no key was passed. The action exports both to Claude
@@ -827,6 +827,25 @@ jobs:
           # With classification already impossible here, buffering bought
           # nothing but that leak. Turning it off also skips the post step.
           classify_inline_comments: 'false'
+          # The one bot allowed to start a review: the PR updater
+          # (_update-stale-prs.yml), which pushes its merge-of-main commit as
+          # the `crossroads-ci-pr-updater` GitHub App. The action rejects any
+          # non-User actor that is not listed, before it calls a model, so
+          # without this every updater push ended in "Workflow initiated by
+          # non-human actor" and an unreviewed head. A re-run cannot recover
+          # it: a re-run keeps the original `github.actor` (crossroads-ci#102).
+          #
+          # An explicit name, never '*'. The action checks a listed bot by
+          # name only -- no installation or write-access check -- and this
+          # reviewer holds `pull-requests: write`. The match is
+          # case-insensitive, strips a trailing `[bot]`, and applies only to
+          # non-User accounts. The job `if:` above still excludes Dependabot,
+          # and the OIDC token exchange is untouched: it already succeeded for
+          # the bot-initiated run, and only this actor check rejected it.
+          #
+          # Rename or recreate the App and this stops matching, silently; the
+          # test in actions/await-codex-review/workflow.test.js holds the name.
+          allowed_bots: crossroads-ci-pr-updater
           # This is AGENT mode: `prompt:` is set and track_progress defaults to
           # false. In agent mode nothing is granted implicitly -- a prompt can
           # ask for twenty inline comments and the model will have no tool able
