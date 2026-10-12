@@ -4,7 +4,11 @@
 # owner can take (install the App on the repo, put its credentials in the repo's
 # main-only `pr-updater` environment). Re-runnable per repository:
 #
-#   scripts/rollout-update-stale-prs.sh
+#   scripts/rollout-update-stale-prs.sh [repository-name]
+#
+# It fetches the App's public Client ID itself, and offers the newest
+# crossroads-ci-pr-updater.*.private-key.pem in ~/Downloads; override with
+# PU_CLIENT_ID and PU_PEM_PATH in the environment.
 #
 # Generated with the /wizard skill; see README, "Stale PR updates".
 #
@@ -228,7 +232,12 @@ say "Repositories that gain from this are those on a full or full+tags profile:"
 note "crossroads-agent-system  crossroads-ui  crossroads-evolution  hq  crossroads-os"
 note "storybook-live-code-sandbox  storybook-live-code-addon"
 printf '\n'
-ask ROLL_REPO "Repository name, no owner (type it; there is no default):"
+if [[ -n "${1:-}" ]]; then
+  ROLL_REPO="$1"
+  say "Repository: $ROLL_REPO (from the command line)"
+else
+  ask ROLL_REPO "Repository name, no owner (type it; there is no default):"
+fi
 [[ -n "$ROLL_REPO" ]] || { warn "A repository name is required."; exit 1; }
 ROLL_REPO_ID=$(gh api "repos/$ORG/$ROLL_REPO" --jq .id) ||
   { warn "Cannot read $ORG/$ROLL_REPO."; exit 1; }
@@ -253,13 +262,21 @@ pause "Continue?"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
 stage "Install the App on $ROLL_REPO"
-say "The App is installed on selected repositories only, so $ROLL_REPO has to be added."
-open_url "https://github.com/organizations/$ORG/settings/installations/$INSTALL_ID"
-step "Under 'Repository access' keep 'Only select repositories'."
-step "Open the repository picker and add: $ROLL_REPO"
-step "Click Save. The list should now include $ROLL_REPO."
-note "Do not change the permissions here; they are already right."
-confirm "Is $ROLL_REPO listed on that page?" || { warn "Re-run when it is."; exit 1; }
+# A successful updater run proves the App is installed here: its token mints.
+ran=$(gh run list --repo "$ORG/$ROLL_REPO" --workflow update-stale-prs.yml --branch main \
+  --status success --limit 1 --json conclusion --jq 'length' 2>/dev/null || echo 0)
+if [[ "$ran" == "1" ]]; then
+  say "✓ A successful updater run exists in $ROLL_REPO, so the App is already installed there."
+  pause "Continue?"
+else
+  say "The App is installed on selected repositories only, so $ROLL_REPO has to be added."
+  open_url "https://github.com/organizations/$ORG/settings/installations/$INSTALL_ID"
+  step "Under 'Repository access' keep 'Only select repositories'."
+  step "Open the repository picker and add: $ROLL_REPO"
+  step "Click Save. The list should now include $ROLL_REPO."
+  note "Do not change the permissions here; they are already right."
+  confirm "Is $ROLL_REPO listed on that page?" || { warn "Re-run when it is."; exit 1; }
+fi
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
 stage "Create the main-only environment and put the credentials in it"
@@ -269,16 +286,40 @@ printf '\n'
 need_values=0
 for s in "${SECRETS[@]}"; do env_has_secret "$s" || need_values=1; done
 if (( need_values )); then
-  open_url "https://github.com/organizations/$ORG/settings/apps/$APP_SLUG"
-  step "About → copy the Client ID (starts Iv)."
-  ask PU_CLIENT_ID "Paste the Client ID:"
-  [[ "$PU_CLIENT_ID" == Iv* ]] || { warn "That does not look like a Client ID (expected Iv...)."; exit 1; }
-  step "Use the .pem you keep in Infisical, or on this page: Private keys → Generate a private key"
-  note "(it downloads a .pem; existing keys keep working, so this is safe to do)."
-  ask PU_PEM_PATH "Path to the .pem file:"
+  # The Client ID is public, so take it from the App's public page: nothing to
+  # copy or mistype.
+  if [[ -z "${PU_CLIENT_ID:-}" ]]; then
+    PU_CLIENT_ID=$(gh api "apps/$APP_SLUG" --jq .client_id 2>/dev/null || true)
+  fi
+  if [[ "${PU_CLIENT_ID:-}" != Iv* ]]; then
+    open_url "https://github.com/organizations/$ORG/settings/apps/$APP_SLUG"
+    step "About → copy the Client ID (starts Iv)."
+    ask PU_CLIENT_ID "Paste the Client ID:"
+    [[ "$PU_CLIENT_ID" == Iv* ]] || { warn "That does not look like a Client ID (expected Iv...)."; exit 1; }
+  else
+    say "✓ Client ID $PU_CLIENT_ID (from the App's public page)"
+  fi
+  # The key: an explicit PU_PEM_PATH, else the newest file named for this App in
+  # Downloads (confirmed), else ask.
+  if [[ -z "${PU_PEM_PATH:-}" ]]; then
+    PU_PEM_PATH=""
+    for f in "$HOME/Downloads/${APP_SLUG}".*.private-key.pem; do
+      [[ -f "$f" ]] || continue
+      if [[ -z "$PU_PEM_PATH" || "$f" -nt "$PU_PEM_PATH" ]]; then PU_PEM_PATH="$f"; fi
+    done
+    if [[ -n "$PU_PEM_PATH" ]]; then
+      say "Found a key file for this App: $PU_PEM_PATH"
+      confirm "Use it?" || PU_PEM_PATH=""
+    fi
+  fi
+  if [[ -z "$PU_PEM_PATH" ]]; then
+    open_url "https://github.com/organizations/$ORG/settings/apps/$APP_SLUG"
+    step "Private keys → Generate a private key (it downloads a .pem; existing keys keep working)."
+    ask PU_PEM_PATH "Path to the .pem file, including the filename:"
+  fi
   PU_PEM_PATH="${PU_PEM_PATH/#\~/$HOME}"
   if [[ ! -f "$PU_PEM_PATH" ]] || ! grep -q -- '-----BEGIN' "$PU_PEM_PATH"; then
-    warn "That is not a PEM file."; exit 1
+    warn "That is not a PEM file (is it a folder, or missing the filename?)."; exit 1
   fi
 else
   say "Both environment secrets are already set; only the environment itself is checked."
