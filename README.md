@@ -290,6 +290,14 @@ the App holds all of them. Deliver both secrets through Infisical
 like the fleet-audit App's. Without them the run fails at its first step and
 says why.
 
+The App's slug, `crossroads-ci-pr-updater`, is also named in `_ai-review.yml`
+as the one bot the Claude fallback reviewer accepts (`allowed_bots`). The
+action rejects any other bot as a non-human actor, and a re-run keeps the
+original actor, so without that entry every updater push would leave its head
+without the fallback review. If the App is renamed or recreated under another
+slug, change that entry and the test beside it, then bump the `_ai-review.yml`
+pin in the consumers.
+
 ### Merge queue
 
 The stale-PR updater above is one answer to stranded branches; a merge queue
