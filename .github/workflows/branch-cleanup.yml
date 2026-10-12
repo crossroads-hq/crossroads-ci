@@ -1,0 +1,92 @@
+# Weekly: delete the remote branches that are finished with, on every
+# repository in governance/repositories.txt. scripts/clean-branches.sh holds
+# the rules (it keeps the default branch, protected branches, open pull request
+# heads, and anything with commits its closed pull request does not have) and
+# is dry-run unless APPLY=1.
+#
+# Runs on ubuntu-latest, deliberately, for the reason fleet-drift-audit.yml
+# gives: housekeeping that needs the self-hosted fleet to be up is silent
+# exactly when the fleet is not.
+#
+# Rollout: the scheduled run only deletes when the repository variable
+# BRANCH_CLEANUP_APPLY is "true". Until then it lists what it would delete in
+# the job summary. Set the variable after reading one such summary. A manual run
+# deletes only when its `apply` input is ticked.
+name: Branch cleanup
+
+on:
+  schedule:
+    # Sundays 06:00 UTC, the day before the Monday fleet drift audit, so the
+    # audit never reports on branches this run is about to remove.
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Delete the branches (otherwise only list them)
+        type: boolean
+        default: false
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  clean:
+    name: Branch cleanup
+    # A write-capable token: never from a branch other than the one that holds
+    # the reviewed script.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Delivered by Infisical (project crossroads-ci, Production, /ci). There
+      # is no GITHUB_TOKEN fallback: it sees only this repository, and a run
+      # that quietly covers one repository of eleven is worse than a red one.
+      - name: Check the branch-cleaner App credentials are configured
+        env:
+          # Presence only; the values never reach this step.
+          CLIENT_ID_SET: ${{ secrets.BRANCH_CLEANER_APP_CLIENT_ID != '' }}
+          KEY_SET: ${{ secrets.BRANCH_CLEANER_APP_PRIVATE_KEY != '' }}
+        run: |
+          missing=""
+          [ "$CLIENT_ID_SET" = "true" ] || missing="$missing BRANCH_CLEANER_APP_CLIENT_ID"
+          [ "$KEY_SET" = "true" ] || missing="$missing BRANCH_CLEANER_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            {
+              echo "### Branch cleanup did not run"
+              echo
+              echo "Missing Actions secret(s):${missing}. They belong to the"
+              echo "branch-cleaner GitHub App. See README, \"Weekly cleanup\"."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Missing Actions secret(s):${missing}. The branch cleanup cannot reach the fleet repositories without the branch-cleaner App."
+            exit 1
+          fi
+
+      # No `repositories`: the token covers every repository the App is
+      # installed on, and the script walks the roster. Contents write is what
+      # deleting a ref takes; pull requests are only read, to see which branches
+      # are still in use.
+      - name: Mint a token for the cleanup
+        id: cleaner-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.BRANCH_CLEANER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BRANCH_CLEANER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: read
+          permission-metadata: read
+
+      - name: Clean branches
+        env:
+          GH_TOKEN: ${{ steps.cleaner-token.outputs.token }}
+          APPLY: ${{ ((github.event_name == 'schedule' && vars.BRANCH_CLEANUP_APPLY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.apply)) && '1' || '0' }}
+        run: bash scripts/clean-branches.sh

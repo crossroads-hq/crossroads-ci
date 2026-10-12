@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly idle-only cleanup of runner work folders, caches and local branches
+Documentation=https://github.com/crossroads-hq/crossroads-ci/tree/main/runner-host
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/fleet-runner-clean
+ExecStart=/usr/local/sbin/fleet-runner-clean
+# The script may wait up to WAIT_MINUTES (default 120) for the host to go
+# idle before it starts, then work through the runners.
+TimeoutStartSec=4h
+# Lower than the CI jobs it shares the disk with.
+Nice=10
+IOSchedulingClass=idle

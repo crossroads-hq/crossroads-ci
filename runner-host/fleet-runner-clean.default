@@ -1,0 +1,24 @@
+# Settings for fleet-runner-clean (runner-host/fleet-runner-clean.sh).
+# Installed to /etc/default/fleet-runner-clean once; install.sh never overwrites
+# it. Uncomment a line to change it.
+
+# Runner install folders, a space-separated list of globs.
+#RUNNER_DIRS="/home/*/actions-runner*"
+
+# _work/_temp entries older than this many days are removed.
+#TEMP_RETAIN_DAYS=3
+
+# A checkout under _work that nothing inside has changed for this many days is
+# removed; the runner clones it again on the next job.
+#WORK_RETAIN_DAYS=14
+
+# The runner user's npm cache (~/.npm/_cacache) is cleared once it is larger
+# than this many MB.
+#NPM_CACHE_MAX_MB=4096
+
+# How long to wait for the host to go idle before giving up until next week.
+#WAIT_MINUTES=120
+
+# Set empty to skip the Docker prune.
+#DOCKER=docker
+#DOCKER_UNTIL=168h
