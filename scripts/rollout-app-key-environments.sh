@@ -342,6 +342,8 @@ fi
 stage "Put the credentials in the environment"
 say "Environment '$ENVNAME' in $REPO, allowing deployments from main only."
 say "The two values go in as ENVIRONMENT secrets, which override the repository ones."
+note "If you already created the Infisical folder and its environment sync (README, 'Keys of the other three Apps'),"
+note "the secrets are there and this stage only checks the environment. Setting them by hand is the fallback."
 printf '\n'
 confirm "Create/repair environment $ENVNAME (main only) and set the missing secrets?" ||
   { warn "Nothing changed."; exit 1; }
@@ -382,12 +384,16 @@ stage "Retire the repository copies and the old key"
 say "Order matters: stop the sync that writes the repository copies first, or it"
 say "re-creates them. Then delete them, then the old key, then prove it again."
 printf '\n'
-say "1. Infisical: project crossroads-ci, Production, /ci, sync ci-ci-prod. Make it stop"
-say "   writing ${ID_NAME} and ${KEY_NAME} as repository secrets: retarget it to the"
-say "   GitHub environment '$ENVNAME' (if the sync supports that), or remove those two"
-say "   keys from it. I do not know the sync's current UI, so follow what it offers."
-note "If Infisical keeps the OLD key, the next sync would overwrite the new one in the environment."
-confirm "Is the sync no longer writing those two as repository secrets (or retargeted)?" ||
+say "1. Infisical (project crossroads-ci, Production). One sync maps one folder to one"
+say "   destination, so each App needs its own folder and its own environment sync:"
+step "Folder /$APP holding $ID_NAME and $KEY_NAME (the key as one line, each line break written as \n)."
+step "Integrations → Secret Syncs → Add Sync → GitHub: source Production /$APP; destination the"
+step "same GitHub connection as ci-ci-prod, scope Repository Environment, repository crossroads-ci,"
+step "environment $ENVNAME; auto-sync on, initial sync overwrite, secret deletion off; name ci-$APP-prod."
+step "Remove those two secrets from the /ci folder, so ci-ci-prod stops carrying them."
+note "Secrets set by hand in stage 3 are 'manual' against crossroads-os ADR-0005; the sync above is what makes them Infisical's."
+note "If Infisical still held the OLD key for this environment, its next sync would overwrite the new one."
+confirm "Is $ENVNAME delivered by its own sync, and /ci no longer carrying those two?" ||
   { warn "Do that first, then re-run; nothing has been deleted."; exit 1; }
 printf '\n'
 for s in "$ID_NAME" "$KEY_NAME"; do

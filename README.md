@@ -388,8 +388,13 @@ so the protection starts only when the owner does the rest, per App:
 1. Create the environment with the `main`-only policy (the commands under
    "In other fleet repositories" create `pr-updater` the same way; use the environment name
    above).
-2. Point the Infisical sync at the environment, so the secrets arrive there and
-   not as repository secrets, then let it sync.
+2. In Infisical, give the App its own folder (`/fleet-audit`, `/branch-cleaner`,
+   `/runner-cleaner`) holding its two secrets, and add a sync from that folder to
+   the GitHub environment (scope Repository Environment; for example
+   `ci-fleet-audit-prod`). One sync maps one folder to one destination, so
+   `ci-ci-prod` (repository scope, folder `/ci`) cannot deliver to three
+   environments; `ui-deploy-prod` does the same for crossroads-ui's `production`
+   environment. Remove the two secrets from `/ci`, then let the new sync run.
 3. Run the workflow by hand from `main` (Actions, Run workflow) and check it
    still works.
 4. Delete the repository-level copies of the two secrets, and rotate the key on
