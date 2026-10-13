@@ -28,7 +28,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/clean-branches.sh` | Delete finished remote branches across the roster: closed pull request with an unchanged head, never the default or an open-PR branch. **Dry-run by default**; `APPLY=1` mutates. Runs weekly as `.github/workflows/branch-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/clean-runners.sh` | List, and with `APPLY=1` remove, offline self-hosted runner registrations. Runs weekly as `.github/workflows/runner-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/clean-worktrees.sh` | For a developer machine, not scheduled: find git worktrees whose remote branch is gone or whose branch is merged, and with `APPLY=1` remove them and their branches. Never touches a dirty, locked, detached, current or main worktree. **Dry-run by default**; see [Weekly cleanup](#weekly-cleanup). |
-| `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
+| `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base, optionally only the oldest `MAX_UPDATES` of them. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
 | `scripts/resolve-conflicts.sh` | Resolve the conflicts on a `needs-rebase` PR with Claude, on demand and locally: merge the base into the head in a scratch worktree, validate, push a signed merge commit. Never force-pushes; never touches forks. See [Resolving conflicts](#resolving-conflicts). |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
@@ -275,6 +275,30 @@ opt a PR in. PRs without it are left alone, so a merge does not re-run CI and
 AI review on every open PR. A PR that conflicts is left to its author, with a
 `needs-rebase` label and one comment per head commit; the label comes off once
 the PR is current again.
+
+#### Limiting how many PRs are kept current
+
+With strict required checks only one PR can merge before the next merge strands
+the others again, so updating all N auto-merge PRs after every merge spends N
+validation runs to merge one. A repository with many auto-merge PRs can bound
+this: `MAX_UPDATES` (the `max-updates` input of `actions/update-stale-prs`) keeps
+at most that many current at once. Unset or empty keeps every one current, as
+before; anything other than a positive integer fails the run.
+
+- The PRs are taken oldest auto-merge first (`autoMergeRequest.enabledAt`, then
+  number), and only the first `MAX_UPDATES` count. The rest are left for a later
+  run, which the next merge to the base branch starts.
+- A PR with a failed check on its head is passed over and does not count: a red
+  PR at the front would otherwise stall everything behind it. Cancelled and
+  skipped checks are not failures, and a rollup that cannot be read counts as not
+  failing. Any failed check counts, required or not, so a PR whose only failure
+  is a non-required check is also passed over until it is fixed.
+- A PR that conflicts is flagged for its author as before and does not count.
+  A PR that is already current counts: it is in flight, so nothing behind it is
+  updated until it merges or fails.
+- A cap of 1 is the fewest validation runs. 2 or 3 also covers a front PR that
+  is green but waiting on a review or a resolved thread, which a cap of 1 would
+  let hold the only slot.
 
 It authenticates as a GitHub App, not `GITHUB_TOKEN`: a push made with
 `GITHUB_TOKEN` starts no workflows, so the updated PR would never re-run

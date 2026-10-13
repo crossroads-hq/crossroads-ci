@@ -23,6 +23,13 @@ inputs:
     description: Base branch whose pull requests to keep current.
     required: false
     default: main
+  max-updates:
+    description: >-
+      Keep at most this many auto-merge pull requests current at once, oldest
+      auto-merge first, passing over any whose checks have failed. Empty keeps
+      every one of them current, as before. See the script's header.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -33,6 +40,7 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         REPO: ${{ inputs.repo }}
         BASE: ${{ inputs.base }}
+        MAX_UPDATES: ${{ inputs.max-updates }}
         ACTION_PATH: ${{ github.action_path }}
       # The script sits two directories up in the checkout of this repository
       # that Actions makes at the pinned SHA, so there is one copy of it.
