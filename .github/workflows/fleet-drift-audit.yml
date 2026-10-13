@@ -29,6 +29,11 @@ jobs:
     name: Fleet drift audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Read-only App, but it can list every repository and secret name, and this
+    # job has no `if` on the ref. The environment's deployment-branch policy
+    # (`main` only) is what keeps a branch's workflow from reading its key.
+    # README, "Keys of the other three Apps".
+    environment: fleet-audit
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
