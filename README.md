@@ -29,6 +29,7 @@ Here, the JSON profiles are the only copy.
 | `scripts/clean-runners.sh` | List, and with `APPLY=1` remove, offline self-hosted runner registrations. Runs weekly as `.github/workflows/runner-cleanup.yml`; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/clean-worktrees.sh` | For a developer machine, not scheduled: find git worktrees whose remote branch is gone or whose branch is merged, and with `APPLY=1` remove them and their branches. Never touches a dirty, locked, detached, current or main worktree. **Dry-run by default**; see [Weekly cleanup](#weekly-cleanup). |
 | `scripts/update-stale-prs.sh` | Update open, non-draft, same-repository PRs that have auto-merge enabled and are behind their base, optionally only the oldest `MAX_UPDATES` of them. Exit 1 if the PR list may be truncated, a PR's state is unreadable, or an update fails for a reason other than a conflict or race. Runs on every push to main as `.github/workflows/update-stale-prs.yml`; see [Stale PR updates](#stale-pr-updates). |
+| `scripts/rollout-app-key-environments.sh` | Wizard for the owner steps of moving one of the fleet-audit, branch-cleaner or runner-cleaner Apps' keys out of this repository's secrets into a main-only environment: generate a fresh key, set the environment secrets, prove a run from `main`, retire the repository copies and the old key. Needs the workflow to name the environment first; see "Keys of the other three Apps". |
 | `scripts/resolve-conflicts.sh` | Resolve the conflicts on a `needs-rebase` PR with Claude, on demand and locally: merge the base into the head in a scratch worktree, validate, push a signed merge commit. Never force-pushes; never touches forks. See [Resolving conflicts](#resolving-conflicts). |
 | `scripts/validate-local.sh` | Preflight CI checks locally before push (~30s; optional actionlint/zizmor). |
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
@@ -387,8 +388,13 @@ so the protection starts only when the owner does the rest, per App:
 1. Create the environment with the `main`-only policy (the commands under
    "In other fleet repositories" create `pr-updater` the same way; use the environment name
    above).
-2. Point the Infisical sync at the environment, so the secrets arrive there and
-   not as repository secrets, then let it sync.
+2. In Infisical, give the App its own folder (`/fleet-audit`, `/branch-cleaner`,
+   `/runner-cleaner`) holding its two secrets, and add a sync from that folder to
+   the GitHub environment (scope Repository Environment; for example
+   `ci-fleet-audit-prod`). One sync maps one folder to one destination, so
+   `ci-ci-prod` (repository scope, folder `/ci`) cannot deliver to three
+   environments; `ui-deploy-prod` does the same for crossroads-ui's `production`
+   environment. Remove the two secrets from `/ci`, then let the new sync run.
 3. Run the workflow by hand from `main` (Actions, Run workflow) and check it
    still works.
 4. Delete the repository-level copies of the two secrets, and rotate the key on
