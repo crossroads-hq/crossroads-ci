@@ -362,6 +362,39 @@ without the fallback review. If the App is renamed or recreated under another
 slug, change that entry and the test beside it, then bump the `_ai-review.yml`
 pin in the consumers.
 
+### Keys of the other three Apps
+
+The fleet-audit, branch-cleaner and runner-cleaner Apps' keys are the same kind
+of secret as the PR updater's (see "Where the credentials live, and why"), and
+two of them can write: the branch cleaner holds Contents write and the runner
+cleaner Administration write, on every fleet repository. This repository is
+public, and a repository secret is readable by a workflow run from **any
+branch** of it, including one that deletes the `if: github.ref == 'refs/heads/main'`
+guard from its own copy of the file. So each job now names an environment,
+whose deployment-branch policy allows `main` only:
+
+| Workflow | Environment | Secrets |
+| --- | --- | --- |
+| `fleet-drift-audit.yml` | `fleet-audit` | `FLEET_AUDIT_APP_CLIENT_ID`, `FLEET_AUDIT_APP_PRIVATE_KEY` |
+| `branch-cleanup.yml` | `branch-cleaner` | `BRANCH_CLEANER_APP_CLIENT_ID`, `BRANCH_CLEANER_APP_PRIVATE_KEY` |
+| `runner-cleanup.yml` | `runner-cleaner` | `RUNNER_CLEANER_APP_CLIENT_ID`, `RUNNER_CLEANER_APP_PRIVATE_KEY` |
+
+Naming an environment is compatible with what runs today: until the environment
+holds the secrets, the repository-level copies the Infisical sync `ci-ci-prod`
+delivers still resolve, and an environment secret overrides a repository secret
+of the same name. GitHub creates a missing environment empty and with no policy,
+so the protection starts only when the owner does the rest, per App:
+
+1. Create the environment with the `main`-only policy (the commands under
+   "In other fleet repositories" create `pr-updater` the same way; use the environment name
+   above).
+2. Point the Infisical sync at the environment, so the secrets arrive there and
+   not as repository secrets, then let it sync.
+3. Run the workflow by hand from `main` (Actions, Run workflow) and check it
+   still works.
+4. Delete the repository-level copies of the two secrets, and rotate the key on
+   the App: until step 4 the old key was readable from any branch.
+
 ### Merge queue
 
 The stale-PR updater above is one answer to stranded branches; a merge queue
