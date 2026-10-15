@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review is not in the default set. A PR opened as a draft skips
+    # the AI review (its job requires a non-draft), and without this trigger
+    # marking it ready starts no run, so it would never be reviewed until a push.
+    types: [opened, synchronize, reopened, ready_for_review]
   # Merge-queue entries. Without this trigger a queued PR waits for a
   # "PR Validation" check that never starts and times out of the queue.
   merge_group:
