@@ -35,7 +35,7 @@ Here, the JSON profiles are the only copy.
 | `actions/gate` | The aggregate-gate logic, with `check.test.js` covering it. Composite, not reusable-workflow, so the caller's `PR Validation` check name survives. |
 | `actions/detect-reviewable` | The docs-only filter for AI review, with `.github/` and `.claude/` always reviewable. |
 | `actions/await-codex-review` | Verifies that the exact official Codex account produced a formal review or structured clean-review comment for the pull request's current head. Abbreviated reviewed-commit markers are resolved to a unique full Git object ID before comparison; stale, ambiguous, pending, dismissed, or spoofed evidence does not suppress the fallback. |
-| `actions/update-stale-prs` | Runs `scripts/update-stale-prs.sh` from the pinned commit of this repository. The vehicle for the reusable updater: a caller's token cannot read this private repository, so the script travels inside an action callers may pin. |
+| `actions/update-stale-prs` | Runs `scripts/update-stale-prs.sh` from the pinned commit of this repository. The vehicle for the reusable updater: the script travels inside an action that callers pin by SHA, so they run exactly the reviewed commit. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
 | `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. Keeps the model transcript redacted while surfacing a capped, credential-redacted terminal message for pre-inference API failures. |
@@ -189,9 +189,9 @@ Run by hand with an owner token, the script needs no secret:
 `scripts/audit-fleet-drift.sh`. A classic `gh` login without `admin:org`
 cannot read org secrets, so that one check reports as skipped.
 
-This repository is private; fleet repositories can use its actions and
-workflows because Actions access is set to `user` scope
-(`gh api repos/crossroads-hq/crossroads-ci/actions/permissions/access`).
+This repository is public, so fleet repositories can use its actions and
+workflows. (It was private when this was written; the check for a private
+repository was `gh api repos/crossroads-hq/crossroads-ci/actions/permissions/access`.)
 
 ### Weekly cleanup
 
