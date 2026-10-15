@@ -284,7 +284,8 @@ the others again, so updating all N auto-merge PRs after every merge spends N
 validation runs to merge one. A repository with many auto-merge PRs can bound
 this: `MAX_UPDATES` (the `max-updates` input of `actions/update-stale-prs`) keeps
 at most that many current at once. Unset or empty keeps every one current, as
-before; anything other than a positive integer fails the run.
+before; anything other than a positive integer fails the run. A caller of the
+reusable workflow sets it with `with: { max-updates: 2 }`.
 
 - The PRs are taken oldest auto-merge first (`autoMergeRequest.enabledAt`, then
   number), and only the first `MAX_UPDATES` count. The rest are left for a later

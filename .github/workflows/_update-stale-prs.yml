@@ -63,6 +63,16 @@ on:
         type: string
         required: false
         default: pr-updater
+      max-updates:
+        description: >-
+          Keep at most this many auto-merge pull requests current at once,
+          oldest auto-merge first, passing over any whose checks have failed.
+          Empty (the default) keeps every one of them current, as before. A
+          positive integer; anything else fails the run. README, "Limiting how
+          many PRs are kept current".
+        type: string
+        required: false
+        default: ""
     secrets:
       # Declared so the called workflow can read them, and optional because
       # they arrive from the caller's ENVIRONMENT through `secrets: inherit`
@@ -147,8 +157,9 @@ jobs:
       # check it out. Nothing from the caller is executed. After changing
       # scripts/update-stale-prs.sh, bump this pin to a commit on main.
       - name: Update PRs that are behind
-        uses: crossroads-hq/crossroads-ci/actions/update-stale-prs@52755881822cb5c935a0b0e7bd4f6e6c261045ca # crossroads-ci#95, adds this action
+        uses: crossroads-hq/crossroads-ci/actions/update-stale-prs@1ee4c13d7fa329c970ee651b41c5dfe113d056ef # crossroads-ci#107, adds max-updates
         with:
           token: ${{ steps.token.outputs.token }}
           repo: ${{ github.repository }}
           base: ${{ inputs.base-branch }}
+          max-updates: ${{ inputs.max-updates }}
