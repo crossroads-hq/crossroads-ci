@@ -125,9 +125,8 @@ jobs:
     with:
       codex-wait-seconds: 300
     # The company Console key (CI workspace), a crossroads-hq org secret
-    # delivered by Infisical (crossroads-fleet / prod / ci). The callee still
-    # accepts `claude-code-oauth-token` and prefers the key when both are set,
-    # but no fleet caller passes the OAuth token any more; it is being retired.
+    # delivered by Infisical (crossroads-fleet / prod / ci). The callee no
+    # longer accepts `claude-code-oauth-token`: no fleet caller passed it.
     secrets:
       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
