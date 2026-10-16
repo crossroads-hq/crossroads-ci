@@ -31,30 +31,27 @@ function block(name) {
   return workflow.slice(start, next === -1 ? undefined : next);
 }
 
-test("the reviewer accepts an Anthropic API key and an OAuth token, neither required alone", () => {
+test("the reviewer takes the Anthropic API key, not required alone, and no OAuth token", () => {
   const secrets = workflow.slice(workflow.indexOf("    secrets:\n"), workflow.indexOf("\npermissions:"));
   assert.match(secrets, /anthropic-api-key:[\s\S]*?required: false/);
-  assert.match(secrets, /claude-code-oauth-token:[\s\S]*?required: false/);
+  // A person's subscription token is not a fleet credential: it was removed
+  // when no caller passed it any more (2026-10-16).
+  assert.doesNotMatch(secrets, /^\s+claude-code-oauth-token:/m);
+  assert.doesNotMatch(workflow, /secrets\.claude-code-oauth-token/);
 });
 
-test("an API key, when present, is the only credential handed to the reviewer", () => {
-  // The action exports both to Claude Code; passing both leaves which one
-  // authenticates to Claude Code's precedence. Make the key win by construction.
+test("the API key is the only credential handed to the reviewer", () => {
   const step = block("Claude review");
   assert.match(step, /^\s+anthropic_api_key: \$\{\{ secrets\.anthropic-api-key \}\}$/m);
-  assert.match(
-    step,
-    /^\s+claude_code_oauth_token: \$\{\{ !secrets\.anthropic-api-key && secrets\.claude-code-oauth-token \|\| '' \}\}$/m
-  );
+  assert.doesNotMatch(step, /claude_code_oauth_token:\s+\$\{\{/);
 });
 
-test("a run with neither credential fails by name before the reviewer starts", () => {
+test("a run without the key fails by name before the reviewer starts", () => {
   const step = block("Check a reviewer credential is present");
   assert.match(step, /steps\.codex\.outputs\.reviewed != 'true'/);
   for (const [env, expectFail] of [
-    [{ ANTHROPIC_API_KEY_SET: "", OAUTH_TOKEN_SET: "" }, true],
-    [{ ANTHROPIC_API_KEY_SET: "true", OAUTH_TOKEN_SET: "" }, false],
-    [{ ANTHROPIC_API_KEY_SET: "", OAUTH_TOKEN_SET: "true" }, false],
+    [{ ANTHROPIC_API_KEY_SET: "" }, true],
+    [{ ANTHROPIC_API_KEY_SET: "true" }, false],
   ]) {
     const proc = childProcess.spawnSync("bash", ["-c", runScriptForStep("Check a reviewer credential is present")], {
       env: { ...process.env, ...env },
