@@ -53,8 +53,15 @@ if [ -n "$max_updates" ] && ! [[ "$max_updates" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 limit=200
-prs=$(gh pr list --repo "$REPO" --state open --base "$BASE" --limit "$limit" \
-  --json number,isDraft,isCrossRepository,autoMergeRequest,headRefOid,labels,statusCheckRollup)
+err=$(mktemp)
+if ! prs=$(gh pr list --repo "$REPO" --state open --base "$BASE" --limit "$limit" \
+  --json number,isDraft,isCrossRepository,autoMergeRequest,headRefOid,labels,statusCheckRollup 2>"$err"); then
+  echo "::error::Could not list open PRs: $(cat "$err")"
+  echo "::error::A 'Resource not accessible by integration' naming statusCheckRollup means the token lacks Checks: read and Commit statuses: read. Grant them on the App and have the token request them (permission-checks, permission-statuses)."
+  rm -f "$err"
+  exit 1
+fi
+rm -f "$err"
 
 # A truncated list is unknown state, not "nothing else is open".
 count=$(jq 'length' <<<"$prs")

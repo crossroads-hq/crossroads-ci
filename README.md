@@ -345,12 +345,18 @@ by hand today (see the inventory in crossroads-os); an Infisical `GH env` sync
 per repository is the planned owner, as for the other environment secrets.
 
 App setup (owner action): create a GitHub App owned by `crossroads-hq`, no
-webhook, with Repository permissions **Contents: write**, **Pull requests: write**
-and **Workflows: write**, installed on this repository. Workflows is needed
-because the merge `update-branch` creates carries any `.github/workflows`
-change from `main`, and GitHub rejects such a commit from an App without it.
-The workflow requests exactly these three, so the token fails to mint until
-the App holds all of them. Put both secrets in each repository's `pr-updater`
+webhook, with Repository permissions **Contents: write**, **Pull requests: write**,
+**Workflows: write**, **Checks: read** and **Commit statuses: read**, installed
+on this repository. Workflows is needed because the merge `update-branch`
+creates carries any `.github/workflows` change from `main`, and GitHub rejects
+such a commit from an App without it. Checks and Commit statuses (read only)
+are needed because the script reads each pull request's check results to skip
+those that are failing (`MAX_UPDATES`, crossroads-ci#107); without them the
+script fails on every run that has an open pull request, with "Resource not
+accessible by integration" naming `statusCheckRollup` (this took
+crossroads-evolution's updater down on 2026-10-16). The workflow requests
+exactly these five, so the token fails to mint until the App holds all of them
+and the org owner has approved the updated permissions. Put both secrets in each repository's `pr-updater`
 environment (below); the fleet-audit App's are delivered through Infisical and
 these should be too. Without them the run fails at its first step and says why.
 
