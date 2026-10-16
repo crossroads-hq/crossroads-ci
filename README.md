@@ -38,7 +38,7 @@ Here, the JSON profiles are the only copy.
 | `actions/update-stale-prs` | Runs `scripts/update-stale-prs.sh` from the pinned commit of this repository. The vehicle for the reusable updater: the script travels inside an action that callers pin by SHA, so they run exactly the reviewed commit. |
 | `actions/setup-node-fleet` | Pinned setup-node + npm cache + `npm ci`. |
 | `.github/workflows/_supply-chain.yml` | Reusable: dependency review, OSV scan, gitleaks, optional npm audit. |
-| `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. Keeps the model transcript redacted while surfacing a capped, credential-redacted terminal message for pre-inference API failures. |
+| `.github/workflows/_ai-review.yml` | Reusable: waits for a current-head Codex automatic review, then runs Claude Sonnet only after the bounded wait or when Codex status cannot be verified. Reads the Claude fallback contract from the **base** ref, so a PR cannot rewrite the rules it is judged by. Keeps the model transcript redacted while surfacing a capped, credential-redacted terminal message for pre-inference API failures. This repository does not call it: it is public, and the fleet's `ANTHROPIC_API_KEY` is not shared with it (2026-10-16), so Codex's automatic review is the only reviewer here. |
 | `.github/workflows/_update-stale-prs.yml` | Reusable: mint the PR-updater App token for the calling repository and run `actions/update-stale-prs`, keeping its auto-merge PRs current. See [Stale PR updates](#stale-pr-updates). |
 | `.github/workflows/_workflow-lint.yml` | Reusable: actionlint + zizmor over the caller's workflows. |
 
@@ -125,9 +125,8 @@ jobs:
     with:
       codex-wait-seconds: 300
     # The company Console key (CI workspace), a crossroads-hq org secret
-    # delivered by Infisical (crossroads-fleet / prod / ci). The callee still
-    # accepts `claude-code-oauth-token` and prefers the key when both are set,
-    # but no fleet caller passes the OAuth token any more; it is being retired.
+    # delivered by Infisical (crossroads-fleet / prod / ci). The callee no
+    # longer accepts `claude-code-oauth-token`: no fleet caller passed it.
     secrets:
       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 

@@ -147,21 +147,17 @@ on:
         required: false
         default: false
     secrets:
-      # Pass at least one. The key wins when both are set: it is billed to the
-      # company Console org and does not share a person's subscription limits,
-      # and the OAuth token remains for a caller that has not moved over.
-      # Neither is required here because a Codex review can make the Claude
-      # fallback unnecessary; "Check a reviewer credential is present" fails
-      # the run by name when Claude is needed and neither arrived.
+      # Not required here because a Codex review can make the Claude fallback
+      # unnecessary; "Check a reviewer credential is present" fails the run by
+      # name when Claude is needed and the key did not arrive. The key is billed
+      # to the company Console org. A subscription token
+      # (`claude-code-oauth-token`, `claude setup-token`) was accepted until
+      # 2026-10-16; no fleet caller passed it, so it was removed (a person's
+      # subscription token should not be a fleet credential).
       anthropic-api-key:
         description: >-
           The caller's ANTHROPIC_API_KEY, from the fleet's dedicated CI
-          workspace. Preferred.
-        required: false
-      claude-code-oauth-token:
-        description: >-
-          The caller's CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`). Used
-          only when no API key is passed.
+          workspace.
         required: false
 
 permissions:
@@ -506,10 +502,9 @@ jobs:
         if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && steps.codex.outputs.reviewed != 'true'
         env:
           ANTHROPIC_API_KEY_SET: ${{ secrets.anthropic-api-key && 'true' || '' }}
-          OAUTH_TOKEN_SET: ${{ secrets.claude-code-oauth-token && 'true' || '' }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY_SET" ] && [ -z "$OAUTH_TOKEN_SET" ]; then
-            echo "Claude is needed as the fallback reviewer, but the caller passed neither the anthropic-api-key nor the claude-code-oauth-token secret." >&2
+          if [ -z "$ANTHROPIC_API_KEY_SET" ]; then
+            echo "Claude is needed as the fallback reviewer, but the caller did not pass the anthropic-api-key secret." >&2
             exit 1
           fi
 
@@ -780,10 +775,6 @@ jobs:
         uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1.0.247
         with:
           anthropic_api_key: ${{ secrets.anthropic-api-key }}
-          # Only when no key was passed. The action exports both to Claude
-          # Code, which would leave the choice to its precedence rules; this
-          # makes the key win by construction.
-          claude_code_oauth_token: ${{ !secrets.anthropic-api-key && secrets.claude-code-oauth-token || '' }}
           # Off unless a consumer asks for it. 74b8b5c hardcoded this true to
           # diagnose the instant is_error:true death and c0855ad removed it;
           # bumping the action to v1.0.214 in e041bef fixed that failure, and
