@@ -136,9 +136,11 @@ jobs:
             exit 1
           fi
 
-      # Scoped to the CALLING repository only, and to the three permissions
-      # update-branch needs; Workflows because the merge it creates carries
-      # whatever the base changed under .github/workflows. The token is revoked
+      # Scoped to the CALLING repository only, and to the permissions the update
+      # needs: contents, pull requests and workflows write (Workflows because the
+      # merge it creates carries whatever the base changed under
+      # .github/workflows), and checks and commit statuses READ, which the script
+      # uses to skip pull requests whose checks are failing (MAX_UPDATES). The token is revoked
       # when the job ends. The App must be installed on the caller.
       - name: Mint a token for the update
         id: token
@@ -151,6 +153,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
+          permission-checks: read
+          permission-statuses: read
 
       # The script travels in this repository's action, pinned by SHA: the
       # caller's token cannot read this private repository, so it cannot
