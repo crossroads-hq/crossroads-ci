@@ -12,12 +12,6 @@ test("AGENTS.md carries the Code Review Rules section Codex looks for", () => {
   assert.match(agents, /^## Code Review Rules$/m);
 });
 
-test("the Claude fallback is pointed at the same rules as Codex", () => {
-  const ci = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
-  const job = ci.slice(ci.indexOf("\n  ai-review:\n"), ci.indexOf("\n  gate:\n"));
-  assert.match(job, /^    with:\n      guidelines-file: AGENTS\.md$/m);
-});
-
 test("an AGENTS-only change schedules the job that validates its review rules", () => {
   const ci = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
   const filter = ci.slice(ci.indexOf("            scripts:\n"), ci.indexOf("\n  workflow-lint:\n"));

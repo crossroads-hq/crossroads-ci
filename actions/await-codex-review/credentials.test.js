@@ -62,7 +62,8 @@ test("a run without the key fails by name before the reviewer starts", () => {
   }
 });
 
-test("crossroads-ci's own caller passes the fleet API key", () => {
+test("crossroads-ci is public, so its own CI never receives the fleet API key", () => {
   const ci = fs.readFileSync(path.join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
-  assert.match(ci, /anthropic-api-key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/);
+  assert.doesNotMatch(ci, /secrets\.ANTHROPIC_API_KEY/);
+  assert.doesNotMatch(ci, /uses:\s*\.\/\.github\/workflows\/_ai-review\.yml/);
 });
