@@ -354,7 +354,10 @@ are needed because the script reads each pull request's check results to skip
 those that are failing (`MAX_UPDATES`, crossroads-ci#107); without them the
 script fails on every run that has an open pull request, with "Resource not
 accessible by integration" naming `statusCheckRollup` (this took
-crossroads-evolution's updater down on 2026-10-16). The workflow requests
+crossroads-evolution's updater down on 2026-10-16). The script asks only for
+each check's conclusion and state, because the richer `gh pr list --json
+statusCheckRollup` also fetches `checkSuite.workflowRun`, which needs Actions
+read (the failure that remained after those two were granted). The workflow requests
 exactly these five, so the token fails to mint until the App holds all of them
 and the org owner has approved the updated permissions. Put both secrets in each repository's `pr-updater`
 environment (below); the fleet-audit App's are delivered through Infisical and

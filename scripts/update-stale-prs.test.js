@@ -13,7 +13,7 @@ const { spawnSync } = require("node:child_process");
 const SCRIPT = path.join(__dirname, "update-stale-prs.sh");
 const REPO = "crossroads-hq/demo";
 
-// The stub answers the five calls the script makes and appends one line per
+// The stub answers the six calls the script makes and appends one line per
 // write to CALL_LOG: "PUT <n>", "EDIT <n>", "COMMENT <n>".
 const STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -22,7 +22,14 @@ const fixture = JSON.parse(fs.readFileSync(process.env.FIXTURE, "utf8"));
 const log = (line) => fs.appendFileSync(process.env.CALL_LOG, line + "\\n");
 const endpoint = args.find((a) => a.startsWith("repos/"));
 if (args[0] === "pr" && args[1] === "list") {
-  process.stdout.write(JSON.stringify(fixture.prs));
+  if (args.join(" ").includes("statusCheckRollup")) { console.error("Resource not accessible by integration (statusCheckRollup)"); process.exit(1); }
+  process.stdout.write(JSON.stringify(fixture.prs.map(({ statusCheckRollup, ...rest }) => rest)));
+} else if (args[0] === "api" && args[1] === "graphql") {
+  const number = Number(args.find((a) => a.startsWith("number=")).slice(7));
+  const pr = fixture.prs.find((p) => p.number === number);
+  if (!pr || pr.statusCheckRollup === null) { console.error("unreadable"); process.exit(1); }
+  const nodes = pr.statusCheckRollup.map((c) => ({ __typename: c.__typename, conclusion: c.conclusion, state: c.state }));
+  process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes } } } }] } } } } }));
 } else if (args[0] === "pr" && (args[1] === "edit" || args[1] === "comment")) {
   log(args[1].toUpperCase() + " " + args[2]);
 } else if (args[0] === "label") {
