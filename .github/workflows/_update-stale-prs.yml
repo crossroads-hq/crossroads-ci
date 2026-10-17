@@ -161,7 +161,7 @@ jobs:
       # check it out. Nothing from the caller is executed. After changing
       # scripts/update-stale-prs.sh, bump this pin to a commit on main.
       - name: Update PRs that are behind
-        uses: crossroads-hq/crossroads-ci/actions/update-stale-prs@1ee4c13d7fa329c970ee651b41c5dfe113d056ef # crossroads-ci#107, adds max-updates
+        uses: crossroads-hq/crossroads-ci/actions/update-stale-prs@cce892a01af346774c38bbe97f96fbe80036d2ea # crossroads-ci#116, reads check results without Actions read
         with:
           token: ${{ steps.token.outputs.token }}
           repo: ${{ github.repository }}
