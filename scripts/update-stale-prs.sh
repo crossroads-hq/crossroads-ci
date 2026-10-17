@@ -21,7 +21,8 @@
 # cap, the PRs are taken oldest auto-merge first and only the first
 # MAX_UPDATES count; the rest wait for a later run, which every merge to the
 # base branch starts. A PR does not count, and is passed over, when a check on
-# its head has failed (a red PR at the front would otherwise stall everything
+# its head has failed, read with a query that needs only Checks and Commit
+# statuses read, not Actions read (a red PR at the front would otherwise stall everything
 # behind it) or when it conflicts with the base (it is flagged for its author as
 # below). A PR that is already current counts: it is in flight. A PR whose
 # checks cannot be read is treated as not failing.
@@ -55,9 +56,8 @@ fi
 limit=200
 err=$(mktemp)
 if ! prs=$(gh pr list --repo "$REPO" --state open --base "$BASE" --limit "$limit" \
-  --json number,isDraft,isCrossRepository,autoMergeRequest,headRefOid,labels,statusCheckRollup 2>"$err"); then
+  --json number,isDraft,isCrossRepository,autoMergeRequest,headRefOid,labels 2>"$err"); then
   echo "::error::Could not list open PRs: $(cat "$err")"
-  echo "::error::A 'Resource not accessible by integration' naming statusCheckRollup means the token lacks Checks: read and Commit statuses: read. Grant them on the App and have the token request them (permission-checks, permission-statuses)."
   rm -f "$err"
   exit 1
 fi
@@ -97,16 +97,44 @@ This branch conflicts with \`$BASE\`, so it cannot be updated automatically and 
   fi
 }
 
+# True when a check on the PR's head has concluded badly. Cancelled and skipped
+# runs are not failures. Only conclusion and state are asked for: the richer
+# rollup that `gh pr list --json statusCheckRollup` fetches includes
+# checkSuite.workflowRun, which needs Actions: read that this token lacks. A
+# rollup that cannot be read is unknown, which counts as not failing.
+has_failed_check() { # number
+  local out
+  # shellcheck disable=SC2016 # the $ are GraphQL variables, not shell
+  if ! out=$(gh api graphql -F owner="${REPO%%/*}" -F name="${REPO#*/}" -F number="$1" -f query='
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+            __typename
+            ... on CheckRun { conclusion }
+            ... on StatusContext { state }
+          } } } } } }
+        }
+      }
+    }' 2>&1); then
+    echo "::warning::PR #$1: could not read its checks, treating them as not failing: $out"
+    return 1
+  fi
+  jq -e 'any((.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[];
+    ((.conclusion // "") as $c | ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"] | index($c) != null)
+    or ((.state // "") as $s | ["FAILURE", "ERROR"] | index($s) != null))' <<<"$out" >/dev/null
+}
+
 failed=0
 updated=0
 slots=0 # PRs counted against MAX_UPDATES
-while IFS=$'\t' read -r number sha labelled failing; do
+while IFS=$'\t' read -r number sha labelled; do
   if [ -n "$max_updates" ]; then
     if [ "$slots" -ge "$max_updates" ]; then
       echo "PR #$number: left for a later run ($max_updates PR(s) are ahead of it)."
       continue
     fi
-    if [ "$failing" = "true" ]; then
+    if has_failed_check "$number"; then
       echo "PR #$number: passed over, a check on its head has failed."
       continue
     fi
@@ -145,16 +173,11 @@ while IFS=$'\t' read -r number sha labelled failing; do
     failed=1
   fi
 done < <(jq -r '
-  # A check that has concluded badly. Cancelled and skipped runs are not
-  # failures, and a missing rollup is unknown, which counts as not failing.
-  def failing: any((.statusCheckRollup // [])[];
-    ((.conclusion // "") as $c | ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"] | index($c) != null)
-    or ((.state // "") as $s | ["FAILURE", "ERROR"] | index($s) != null));
   [.[]
     | select(.isDraft == false and .isCrossRepository == false and .autoMergeRequest != null)]
   | sort_by([(.autoMergeRequest.enabledAt // "9999"), .number])
   | .[]
-  | [.number, .headRefOid, (any(.labels[]; .name == "needs-rebase")), failing] | @tsv' <<<"$prs")
+  | [.number, .headRefOid, (any(.labels[]; .name == "needs-rebase"))] | @tsv' <<<"$prs")
 
 echo "Updated $updated pull request(s) of $count open against $BASE."
 exit "$failed"
