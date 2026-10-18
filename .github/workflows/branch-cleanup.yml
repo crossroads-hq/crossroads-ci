@@ -46,7 +46,9 @@ jobs:
     # them. The `if` above is not enough: a branch can edit its own copy of this
     # file and drop it. Until the environment holds both secrets, the
     # repository-level copies (Infisical sync ci-ci-prod) still resolve and the
-    # key stays readable from any branch. README, "Keys of the other three Apps".
+    # key stays readable from any branch. The three maintenance Apps share this
+    # environment, fed by one Infisical sync. README, "Keys of the other three
+    # Apps".
     environment: branch-cleaner
     steps:
       - name: Checkout
