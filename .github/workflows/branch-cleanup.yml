@@ -45,16 +45,20 @@ jobs:
     # policy is `main` only, so a workflow run from any other branch is refused
     # them. The `if` above is not enough: a branch can edit its own copy of this
     # file and drop it. Until the environment holds both secrets, the
-    # repository-level copies (Infisical sync ci-ci-prod) still resolve and the
-    # key stays readable from any branch. README, "Keys of the other three Apps".
-    environment: branch-cleaner
+    # repository-level copies (the old Infisical sync ci-ci-prod) still resolve and the
+    # key stays readable from any branch. The three maintenance Apps share this
+    # environment, fed by one Infisical sync. README, "Keys of the other three
+    # Apps".
+    environment: maintenance-apps
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Delivered by Infisical (project crossroads-ci, Production, /ci). There
+      # Delivered by Infisical (project crossroads-ci, Production,
+      # /ci/maintenance-apps, sync ci-maintenance-apps-prod) into the
+      # maintenance-apps environment. There
       # is no GITHUB_TOKEN fallback: it sees only this repository, and a run
       # that quietly covers one repository of eleven is worse than a red one.
       #

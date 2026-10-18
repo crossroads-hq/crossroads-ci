@@ -202,7 +202,14 @@ ORG=crossroads-hq
 REPO="$ORG/crossroads-ci"
 TOTAL_STAGES=5
 
-# Per App: GitHub App slug, environment, workflow file, secret prefix, and the
+# All three Apps share one environment and one Infisical folder and sync, because
+# Infisical's plan caps the number of syncs and one sync maps one folder to one
+# environment.
+ENVIRONMENT=maintenance-apps
+FOLDER=/ci/maintenance-apps
+SYNC=ci-maintenance-apps-prod
+
+# Per App: GitHub App slug, workflow file, secret prefix, and the
 # `gh workflow run` flags for a harmless manual run (the cleaners are dry-run
 # unless `apply` is ticked; the audit is read-only).
 APPS=(fleet-audit branch-cleaner runner-cleaner)
@@ -277,7 +284,7 @@ if [[ -n "${1:-}" ]]; then APP="$1"; else
   ask APP "Which App? (type one; there is no default)"
 fi
 case " ${APPS[*]} " in *" $APP "*) ;; *) warn "Unknown App '$APP'."; exit 1 ;; esac
-ENVNAME="$APP"
+ENVNAME="$ENVIRONMENT"
 SLUG=$(app_field "$APP" slug); WORKFLOW=$(app_field "$APP" workflow)
 PREFIX=$(app_field "$APP" prefix); RUNFLAGS=$(app_field "$APP" runflags)
 ID_NAME="${PREFIX}_CLIENT_ID"; KEY_NAME="${PREFIX}_PRIVATE_KEY"
@@ -342,7 +349,7 @@ fi
 stage "Put the credentials in the environment"
 say "Environment '$ENVNAME' in $REPO, allowing deployments from main only."
 say "The two values go in as ENVIRONMENT secrets, which override the repository ones."
-note "If you already created the Infisical folder and its environment sync (README, 'Keys of the other three Apps'),"
+note "If you already created the Infisical folder $FOLDER and its sync $SYNC (README, 'Keys of the other three Apps'),"
 note "the secrets are there and this stage only checks the environment. Setting them by hand is the fallback."
 printf '\n'
 confirm "Create/repair environment $ENVNAME (main only) and set the missing secrets?" ||
@@ -384,16 +391,17 @@ stage "Retire the repository copies and the old key"
 say "Order matters: stop the sync that writes the repository copies first, or it"
 say "re-creates them. Then delete them, then the old key, then prove it again."
 printf '\n'
-say "1. Infisical (project crossroads-ci, Production). One sync maps one folder to one"
-say "   destination, so each App needs its own folder and its own environment sync:"
-step "Folder /$APP holding $ID_NAME and $KEY_NAME (the key as one line, each line break written as \n)."
-step "Integrations → Secret Syncs → Add Sync → GitHub: source Production /$APP; destination the"
-step "same GitHub connection as ci-ci-prod, scope Repository Environment, repository crossroads-ci,"
-step "environment $ENVNAME; auto-sync on, initial sync overwrite, secret deletion off; name ci-$APP-prod."
+say "1. Infisical (project crossroads-ci, Production). The three Apps share one folder and"
+say "   one sync, because the plan caps the number of syncs:"
+step "Folder $FOLDER holding $ID_NAME and $KEY_NAME (the key as one line, each line break written as \n)."
+step "If the sync $SYNC does not exist yet: Integrations → Secret Syncs → Add Sync → GitHub: source"
+step "Production $FOLDER; destination the same GitHub connection as ci-ci-prod, scope Repository"
+step "Environment, repository crossroads-ci, environment $ENVNAME; auto-sync on, initial sync"
+step "overwrite, secret deletion off; name $SYNC. If it exists, let it run again."
 step "Remove those two secrets from the /ci folder, so ci-ci-prod stops carrying them."
 note "Secrets set by hand in stage 3 are 'manual' against crossroads-os ADR-0005; the sync above is what makes them Infisical's."
 note "If Infisical still held the OLD key for this environment, its next sync would overwrite the new one."
-confirm "Is $ENVNAME delivered by its own sync, and /ci no longer carrying those two?" ||
+confirm "Is $ENVNAME delivered by the sync $SYNC, and /ci no longer carrying those two?" ||
   { warn "Do that first, then re-run; nothing has been deleted."; exit 1; }
 printf '\n'
 for s in "$ID_NAME" "$KEY_NAME"; do
