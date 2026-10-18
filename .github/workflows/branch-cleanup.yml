@@ -49,7 +49,7 @@ jobs:
     # key stays readable from any branch. The three maintenance Apps share this
     # environment, fed by one Infisical sync. README, "Keys of the other three
     # Apps".
-    environment: branch-cleaner
+    environment: maintenance-apps
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

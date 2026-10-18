@@ -205,8 +205,9 @@ TOTAL_STAGES=5
 # All three Apps share one environment and one Infisical folder and sync, because
 # Infisical's plan caps the number of syncs and one sync maps one folder to one
 # environment.
-ENVIRONMENT=branch-cleaner
-SYNC=ci-branch-cleaner-prod
+ENVIRONMENT=maintenance-apps
+FOLDER=/ci/maintenance-apps
+SYNC=ci-maintenance-apps-prod
 
 # Per App: GitHub App slug, workflow file, secret prefix, and the
 # `gh workflow run` flags for a harmless manual run (the cleaners are dry-run
@@ -348,7 +349,7 @@ fi
 stage "Put the credentials in the environment"
 say "Environment '$ENVNAME' in $REPO, allowing deployments from main only."
 say "The two values go in as ENVIRONMENT secrets, which override the repository ones."
-note "If you already created the Infisical folder /$ENVIRONMENT and its sync $SYNC (README, 'Keys of the other three Apps'),"
+note "If you already created the Infisical folder $FOLDER and its sync $SYNC (README, 'Keys of the other three Apps'),"
 note "the secrets are there and this stage only checks the environment. Setting them by hand is the fallback."
 printf '\n'
 confirm "Create/repair environment $ENVNAME (main only) and set the missing secrets?" ||
@@ -392,9 +393,9 @@ say "re-creates them. Then delete them, then the old key, then prove it again."
 printf '\n'
 say "1. Infisical (project crossroads-ci, Production). The three Apps share one folder and"
 say "   one sync, because the plan caps the number of syncs:"
-step "Folder /$ENVIRONMENT holding $ID_NAME and $KEY_NAME (the key as one line, each line break written as \n)."
+step "Folder $FOLDER holding $ID_NAME and $KEY_NAME (the key as one line, each line break written as \n)."
 step "If the sync $SYNC does not exist yet: Integrations → Secret Syncs → Add Sync → GitHub: source"
-step "Production /$ENVIRONMENT; destination the same GitHub connection as ci-ci-prod, scope Repository"
+step "Production $FOLDER; destination the same GitHub connection as ci-ci-prod, scope Repository"
 step "Environment, repository crossroads-ci, environment $ENVNAME; auto-sync on, initial sync"
 step "overwrite, secret deletion off; name $SYNC. If it exists, let it run again."
 step "Remove those two secrets from the /ci folder, so ci-ci-prod stops carrying them."

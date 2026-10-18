@@ -381,17 +381,17 @@ public, and a repository secret is readable by a workflow run from **any
 branch** of it, including one that deletes the `if: github.ref == 'refs/heads/main'`
 guard from its own copy of the file. So each job now names an environment,
 whose deployment-branch policy allows `main` only. All three name the same
-environment, `branch-cleaner`, so one Infisical sync (`ci-branch-cleaner-prod`,
-folder `/branch-cleaner`) delivers all six secrets. Infisical's plan limits how
+environment, `maintenance-apps`, so one Infisical sync (`ci-maintenance-apps-prod`,
+folder `/ci/maintenance-apps`) delivers all six secrets. Infisical's plan limits how
 many syncs there can be, and one sync maps one folder to one environment. The
 cost is that a job in this environment can read the other two Apps' keys, which
 only code on `main` can do:
 
 | Workflow | Environment | Secrets |
 | --- | --- | --- |
-| `fleet-drift-audit.yml` | `branch-cleaner` | `FLEET_AUDIT_APP_CLIENT_ID`, `FLEET_AUDIT_APP_PRIVATE_KEY` |
-| `branch-cleanup.yml` | `branch-cleaner` | `BRANCH_CLEANER_APP_CLIENT_ID`, `BRANCH_CLEANER_APP_PRIVATE_KEY` |
-| `runner-cleanup.yml` | `branch-cleaner` | `RUNNER_CLEANER_APP_CLIENT_ID`, `RUNNER_CLEANER_APP_PRIVATE_KEY` |
+| `fleet-drift-audit.yml` | `maintenance-apps` | `FLEET_AUDIT_APP_CLIENT_ID`, `FLEET_AUDIT_APP_PRIVATE_KEY` |
+| `branch-cleanup.yml` | `maintenance-apps` | `BRANCH_CLEANER_APP_CLIENT_ID`, `BRANCH_CLEANER_APP_PRIVATE_KEY` |
+| `runner-cleanup.yml` | `maintenance-apps` | `RUNNER_CLEANER_APP_CLIENT_ID`, `RUNNER_CLEANER_APP_PRIVATE_KEY` |
 
 Naming an environment is compatible with what runs today: until the environment
 holds the secrets, the repository-level copies the Infisical sync `ci-ci-prod`
@@ -402,10 +402,10 @@ so the protection starts only when the owner does the rest:
 1. Create the environment with the `main`-only policy (the commands under
    "In other fleet repositories" create `pr-updater` the same way; use the
    environment name above). The wizard does this too.
-2. In Infisical, put all six secrets in one folder, `/branch-cleaner`, and add
-   one sync from that folder to the GitHub environment `branch-cleaner` (scope
+2. In Infisical, put all six secrets in one folder, `/ci/maintenance-apps`, and add
+   one sync from that folder to the GitHub environment `maintenance-apps` (scope
    Repository Environment, auto-sync on, initial sync overwrite, secret deletion
-   off; name `ci-branch-cleaner-prod`). `ci-ci-prod` (repository scope, folder
+   off; name `ci-maintenance-apps-prod`). `ci-ci-prod` (repository scope, folder
    `/ci`) cannot deliver to an environment; `ui-deploy-prod` does the same for
    crossroads-ui's `production` environment. Remove each App's two secrets from
    `/ci` as that App is moved, so `ci-ci-prod` stops recreating the repository
