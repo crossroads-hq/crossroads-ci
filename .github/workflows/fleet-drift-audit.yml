@@ -54,7 +54,8 @@ jobs:
       # reason is how an audit stops being read.
       #
       # Both secrets are delivered by Infisical (project crossroads-ci,
-      # Production, /ci, sync ci-ci-prod). README "Fleet drift audit" records
+      # Production, /ci/maintenance-apps, sync ci-maintenance-apps-prod) into
+      # the maintenance-apps environment. README "Fleet drift audit" records
       # the App's permissions.
       - name: Check the audit App credentials are configured
         env:
@@ -70,8 +71,9 @@ jobs:
               echo "### Fleet drift audit did not run"
               echo
               echo "Missing Actions secret(s):${missing}. They belong to the read-only"
-              echo "fleet-audit GitHub App and are delivered by Infisical sync"
-              echo "\`ci-ci-prod\`. No other token can see the fleet's private"
+              echo "fleet-audit GitHub App and are delivered into the"
+              echo "\`maintenance-apps\` environment by Infisical sync"
+              echo "\`ci-maintenance-apps-prod\`. No other token can see the fleet's private"
               echo "repositories. See README, \"Fleet drift audit\"."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::Missing Actions secret(s):${missing}. The audit cannot see the private fleet repositories without the fleet-audit App."

@@ -43,7 +43,7 @@ jobs:
     # policy is `main` only, so a workflow run from any other branch is refused
     # them. The `if` above is not enough: a branch can edit its own copy of this
     # file and drop it. Until the environment holds both secrets, the
-    # repository-level copies (Infisical sync ci-ci-prod) still resolve and the
+    # repository-level copies (the old Infisical sync ci-ci-prod) still resolve and the
     # key stays readable from any branch. The three maintenance Apps share one
     # environment, `maintenance-apps`, fed by one Infisical sync. README, "Keys of
     # the other three Apps".
@@ -56,7 +56,8 @@ jobs:
 
       # A separate App from the branch cleaner: runner administration is a
       # much larger permission than deleting a branch, and should not ride on
-      # the same key. Delivered by Infisical like the others.
+      # the same key. Delivered into the maintenance-apps environment by Infisical
+      # sync ci-maintenance-apps-prod, like the others.
       #
       # Neither secret set means the App has not been created yet: the run skips
       # with a notice rather than going red every Sunday. Exactly one set is a
