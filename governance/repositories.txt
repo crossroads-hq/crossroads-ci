@@ -76,6 +76,10 @@ crossroads-hq/skills                        minimal    main
 crossroads-hq/crossroads-studio             minimal    main
 crossroads-hq/crossroads-platform           minimal    main
 
+# Tier D — Brain program repository. Created 2026-10-18 on the owner's instruction,
+# private and empty. No CI yet, so `minimal` rather than `full`.
+crossroads-hq/crossroads-brain              minimal    main
+
 # Tier D previously held four entries, all of them wrong: this file named four
 # repositories crossroads-hq has never held, and nothing caught it because the
 # per-repository scripts key on gh's exit status, where a 404 for a name that
