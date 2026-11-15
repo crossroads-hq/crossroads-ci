@@ -89,20 +89,38 @@ const isSha = (value) => typeof value === "string" && /^[0-9a-f]{40}$/.test(valu
 // The open pull requests stacked with `number`: down to the one based on a
 // branch no open pull request owns, and up through everything based on it.
 // Bottom first.
+//
+// A branch is a repository and a name: two forks may both have a `patch-1`,
+// and neither is the branch of that name in this repository. A pull request
+// whose fork was deleted has no head repository, so its branch is its own.
+const headKey = (p) => (p.head.repo ? `${p.head.repo.full_name}:${p.head.ref}` : `#${p.number}:${p.head.ref}`);
+const baseKey = (p) => `${p.base.repo.full_name}:${p.base.ref}`;
+
 function stackOf(pulls, number) {
   const start = pulls.find((p) => p.number === number);
   if (!start) return { error: `#${number} is not an open pull request` };
   const byHead = new Map();
   for (const p of pulls) {
-    if (byHead.has(p.head.ref)) {
-      return { error: `two open pull requests share the branch ${p.head.ref}; the stack is ambiguous` };
-    }
-    byHead.set(p.head.ref, p);
+    const key = headKey(p);
+    byHead.set(key, [...(byHead.get(key) || []), p]);
   }
+  // Two pull requests from one branch are ambiguous only where the stack
+  // passes through that branch.
+  const owner = (key) => {
+    const owners = byHead.get(key) || [];
+    return owners.length > 1
+      ? { error: `two open pull requests share the branch ${owners[0].head.ref}; the stack is ambiguous` }
+      : { pull: owners[0] };
+  };
+  const own = owner(headKey(start));
+  if (own.error) return own;
   let bottom = start;
   const seen = new Set([bottom.number]);
-  while (byHead.has(bottom.base.ref)) {
-    bottom = byHead.get(bottom.base.ref);
+  for (;;) {
+    const below = owner(baseKey(bottom));
+    if (below.error) return below;
+    if (!below.pull) break;
+    bottom = below.pull;
     if (seen.has(bottom.number)) return { error: "the stack's bases form a loop" };
     seen.add(bottom.number);
   }
@@ -111,7 +129,12 @@ function stackOf(pulls, number) {
   while (queue.length > 0) {
     const current = queue.shift();
     ordered.push(current);
-    queue.push(...pulls.filter((p) => p.base.ref === current.head.ref).sort((a, b) => a.number - b.number));
+    const above = pulls.filter((p) => baseKey(p) === headKey(current)).sort((a, b) => a.number - b.number);
+    for (const p of above) {
+      const check = owner(headKey(p));
+      if (check.error) return check;
+    }
+    queue.push(...above);
   }
   return { data: ordered };
 }
@@ -138,25 +161,36 @@ function vouchesFor(api, repo, sha, head) {
   return !resolved.error && resolved.data?.sha?.toLowerCase() === head;
 }
 
+function fileAt(api, repo, path, ref) {
+  const file = api(
+    `repos/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`
+  );
+  return file.error || typeof file.data?.content !== "string"
+    ? null
+    : Buffer.from(file.data.content, "base64").toString("utf8");
+}
+
 // A confirmed Claude fallback review of this commit: a successful "AI review"
-// job, with its evidence step passed, in a run of a workflow that the BASE
-// branch has calling the fleet reviewer. A pull request can add a workflow
-// with a job of that name; it cannot make the base branch's copy call the
-// reviewer.
+// job, with its evidence step passed, in a run on this commit of a workflow
+// that the default branch has calling the fleet reviewer, and that this commit
+// leaves exactly as the default branch has it. A pull request can add a
+// workflow with a job of that name, or rewrite an existing caller so a local
+// job of that name passes a step of that name; either way its copy of the file
+// differs from the trusted one, and the run proves nothing. A pull request that
+// has to change the caller needs a Codex or a person's review instead.
 function claudeReviewed(api, repo, pull) {
   const runs = list(api, `repos/${repo}/actions/runs?head_sha=${pull.head.sha}&per_page=100`, "workflow_runs");
   if (runs.error) return { error: runs.error };
   const trusted = new Map();
   for (const run of runs.data) {
     if (typeof run?.path !== "string" || !Number.isInteger(run?.id)) return { error: "a workflow run was malformed" };
+    if (run.head_sha !== pull.head.sha) continue;
     if (!trusted.has(run.path)) {
-      const file = api(
-        `repos/${repo}/contents/${run.path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(pull.base.repo.default_branch)}`
+      const base = fileAt(api, repo, run.path, pull.base.repo.default_branch);
+      trusted.set(
+        run.path,
+        base !== null && base.includes(REVIEW_WORKFLOW) && fileAt(api, repo, run.path, pull.head.sha) === base
       );
-      const text = file.error || typeof file.data?.content !== "string"
-        ? ""
-        : Buffer.from(file.data.content, "base64").toString("utf8");
-      trusted.set(run.path, text.includes(REVIEW_WORKFLOW));
     }
     if (!trusted.get(run.path)) continue;
     const jobs = list(api, `repos/${repo}/actions/runs/${run.id}/jobs?per_page=100`, "jobs");
@@ -281,6 +315,8 @@ function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi
   for (const p of pulls.data) {
     if (!Number.isInteger(p?.number) || !isSha(p?.head?.sha) || typeof p?.head?.ref !== "string" ||
         typeof p?.base?.ref !== "string" || typeof p?.draft !== "boolean" ||
+        typeof p?.base?.repo?.full_name !== "string" ||
+        (p.head.repo !== null && typeof p.head.repo?.full_name !== "string") ||
         typeof p?.base?.repo?.default_branch !== "string") {
       return { error: "an open pull request was malformed" };
     }
@@ -308,15 +344,17 @@ function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi
   // A pull request merges only after every one below it. Its own green build
   // does not make it mergeable while a lower one is still waiting, and GitHub
   // shows that as "blocked downstack".
-  let below = null;
-  for (const row of rows) {
-    if (row.verdict === "MERGEABLE" && below !== null) {
-      row.verdict = "BLOCKED BELOW";
-      row.blockedBy = below;
-    } else if (row.verdict !== "MERGEABLE" && below === null) {
-      below = row.number;
-    }
-  }
+  // The blocker is found along each pull request's own bases: two pull
+  // requests on the same one do not block each other. Rows are bottom first,
+  // so the one below is settled before the ones on it.
+  const rowOn = new Map(stack.data.map((pull, i) => [headKey(pull), rows[i]]));
+  stack.data.forEach((pull, i) => {
+    const lower = rowOn.get(baseKey(pull));
+    if (!lower || lower.verdict === "MERGEABLE") return;
+    const blocker = lower.blockedBy || lower.number;
+    if (rows[i].verdict === "MERGEABLE") rows[i].verdict = "BLOCKED BELOW";
+    rows[i].blockedBy = blocker;
+  });
   const ready = rows.every((row) => row.verdict === "READY TO MARK READY" || row.verdict === "MERGEABLE");
   return { rows, ready };
 }
@@ -330,7 +368,7 @@ function render({ rows, ready }) {
       for (const link of row.facts[name].links || []) lines.push(`           ${link}`);
     }
     lines.push(`    ${row.facts.checks.state === "passed" ? "ok  " : "--  "} checks: ${row.facts.checks.detail}`);
-    if (row.blockedBy) lines.push(`    --   below: waits for #${row.blockedBy}, lower in the stack`);
+    if (row.verdict === "BLOCKED BELOW") lines.push(`    --   below: waits for #${row.blockedBy}, lower in the stack`);
   }
   lines.push("");
   if (ready) lines.push(`All ${rows.length} pull request(s): ready.`);

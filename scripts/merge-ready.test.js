@@ -12,10 +12,10 @@ const REPO = "crossroads-hq/demo";
 const CODEX = { id: 199175422, login: "chatgpt-codex-connector[bot]", type: "Bot" };
 const sha = (letter) => letter.repeat(40);
 
-const pull = (number, head, base, { draft = true, commit = sha("a") } = {}) => ({
+const pull = (number, head, base, { draft = true, commit = sha("a"), from = REPO } = {}) => ({
   number, title: `PR ${number}`, draft,
-  head: { ref: head, sha: commit },
-  base: { ref: base, repo: { default_branch: "main" } },
+  head: { ref: head, sha: commit, repo: from === null ? null : { full_name: from } },
+  base: { ref: base, repo: { full_name: REPO, default_branch: "main" } },
 });
 
 const codexReview = (commit, state = "COMMENTED") => ({
@@ -37,6 +37,8 @@ function world({
   runs = [],
   jobs = {},
   workflows = {},
+  // The same files as this commit has them; the same as main unless a test says otherwise.
+  headWorkflows = workflows,
   checkRuns = [],
   threadPages = [[]],
   fail = [],
@@ -51,9 +53,11 @@ function world({
     if (endpoint.includes("/jobs")) return { data: [{ jobs: jobs[endpoint.match(/runs\/(\d+)\/jobs/)[1]] || [] }] };
     if (endpoint.includes("/actions/runs?head_sha=")) return { data: [{ workflow_runs: runs }] };
     if (endpoint.includes("/contents/")) {
-      const path = decodeURIComponent(endpoint.match(/contents\/(.+)\?ref=main$/)[1]);
-      return path in workflows
-        ? { data: { content: Buffer.from(workflows[path]).toString("base64") } }
+      const [, encoded, ref] = endpoint.match(/contents\/(.+)\?ref=(.+)$/);
+      const path = decodeURIComponent(encoded);
+      const files = ref === "main" ? workflows : headWorkflows;
+      return path in files
+        ? { data: { content: Buffer.from(files[path]).toString("base64") } }
         : { error: "HTTP 404" };
     }
     if (endpoint.includes("/commits/")) return { data: { sha: sha("a") } };
@@ -160,13 +164,31 @@ test("a dismissed Codex review of this commit makes a completed summary row coun
 test("the Claude fallback counts only from a workflow the base branch has calling the fleet reviewer", () => {
   const job = { name: "ai-review / AI review", conclusion: "success", steps: [{ name: "Confirm a review actually reached the pull request", conclusion: "success" }] };
   const calls = "uses: crossroads-hq/crossroads-ci/.github/workflows/_ai-review.yml@68a5403e";
-  const setup = (extra) => ({ runs: [{ id: 11, path: ".github/workflows/validate.yml" }], jobs: { 11: [job] }, ...extra });
+  const run = { id: 11, path: ".github/workflows/validate.yml", head_sha: sha("a") };
+  const setup = (extra) => ({ runs: [run], jobs: { 11: [job] }, ...extra });
 
   assert.equal(one(setup({ workflows: { ".github/workflows/validate.yml": calls } })).verdict, "READY TO MARK READY");
   // The pull request added the workflow: the base branch has no such file.
   assert.equal(one(setup({ workflows: {} })).verdict, "NOT READY");
   // The base branch has the file, but it does not call the reviewer.
   assert.equal(one(setup({ workflows: { ".github/workflows/validate.yml": "jobs: {}" } })).verdict, "NOT READY");
+  // The pull request rewrote the caller: a local job of the same name, with a
+  // step of the same name, ran in place of the reviewer.
+  const forged = "jobs:\n  ai-review:\n    name: AI review\n    steps:\n      - name: Confirm a review actually reached the pull request\n        run: 'true'\n";
+  assert.equal(
+    one(setup({ workflows: { ".github/workflows/validate.yml": calls }, headWorkflows: { ".github/workflows/validate.yml": forged } })).verdict,
+    "NOT READY"
+  );
+  // Even a change that keeps the call: the file is no longer the trusted one.
+  assert.equal(
+    one(setup({ workflows: { ".github/workflows/validate.yml": calls }, headWorkflows: { ".github/workflows/validate.yml": `${calls}\n# edited` } })).verdict,
+    "NOT READY"
+  );
+  // A run on another commit says nothing about this one.
+  assert.equal(
+    one(setup({ workflows: { ".github/workflows/validate.yml": calls }, runs: [{ ...run, head_sha: sha("b") }] })).verdict,
+    "NOT READY"
+  );
   // The job succeeded without its evidence step: it skipped, it did not review.
   assert.equal(
     one(setup({ workflows: { ".github/workflows/validate.yml": calls }, jobs: { 11: [{ ...job, steps: [] }] } })).verdict,
@@ -242,6 +264,47 @@ test("a green pull request above one still building is blocked below, not mergea
   assert.match(render(result), /Blocked by a lower pull request: #12\.$/);
 });
 
+test("two pull requests on the same one do not block each other", () => {
+  const pulls = [
+    pull(1, "bottom", "main", { draft: false, commit: sha("a") }),
+    pull(2, "left", "bottom", { draft: false, commit: sha("b") }),
+    pull(3, "right", "bottom", { draft: false, commit: sha("c") }),
+    pull(4, "on-left", "left", { draft: false, commit: sha("d") }),
+  ];
+  const passed = { name: "PR Validation", status: "completed", conclusion: "success", started_at: "2026-11-14T20:00:00Z" };
+  const base = world({ pulls, reviews: ["a", "b", "c", "d"].map((l) => codexReview(sha(l))) });
+  // Only #2's build has not finished.
+  const api = (endpoint) =>
+    endpoint.includes("/check-runs")
+      ? { data: [{ check_runs: endpoint.includes(sha("b")) ? [] : [passed] }] }
+      : base.api(endpoint);
+  const result = assess({ repo: REPO, number: 1 }, { api, graphql: base.graphql });
+  assert.deepEqual(
+    Object.fromEntries(result.rows.map((r) => [r.number, r.verdict])),
+    { 1: "MERGEABLE", 2: "WAITING FOR CHECKS", 3: "MERGEABLE", 4: "BLOCKED BELOW" }
+  );
+  assert.equal(result.rows.find((r) => r.number === 4).blockedBy, 2);
+});
+
 test("two open pull requests on one branch make the stack ambiguous", () => {
   assert.match(stackOf([pull(1, "same", "main"), pull(2, "same", "main")], 1).error, /ambiguous/);
+});
+
+test("a fork's branch of the same name is a different branch", () => {
+  const pulls = [
+    pull(10, "bottom", "main"),
+    pull(11, "top", "bottom"),
+    // Two forks, each with a `patch-1`; one also has a branch called `bottom`.
+    pull(20, "patch-1", "main", { from: "someone/demo" }),
+    pull(21, "patch-1", "main", { from: "another/demo" }),
+    pull(22, "bottom", "main", { from: "someone/demo" }),
+    // Based on this repository's `patch-1`, which no pull request owns.
+    pull(23, "follow-up", "patch-1"),
+    // Its fork is gone.
+    pull(24, "patch-1", "main", { from: null }),
+  ];
+  assert.deepEqual(stackOf(pulls, 11).data.map((p) => p.number), [10, 11]);
+  assert.deepEqual(stackOf(pulls, 20).data.map((p) => p.number), [20]);
+  assert.deepEqual(stackOf(pulls, 23).data.map((p) => p.number), [23]);
+  assert.deepEqual(stackOf(pulls, 24).data.map((p) => p.number), [24]);
 });
