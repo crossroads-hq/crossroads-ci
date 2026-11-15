@@ -351,7 +351,7 @@ function readStack(api, repo, number) {
   for (const p of pulls.data) {
     if (!Number.isInteger(p?.number) || !isSha(p?.head?.sha) || typeof p?.head?.ref !== "string" ||
         typeof p?.base?.ref !== "string" || typeof p?.draft !== "boolean" ||
-        typeof p?.base?.repo?.full_name !== "string" ||
+        typeof p?.base?.repo?.full_name !== "string" || !isSha(p?.base?.sha) ||
         (p.merge_commit_sha != null && !isSha(p.merge_commit_sha)) ||
         (p.head.repo !== null && typeof p.head.repo?.full_name !== "string") ||
         typeof p?.base?.repo?.default_branch !== "string") {
@@ -397,11 +397,12 @@ function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi
     rows[i].blockedBy = blocker;
   });
   // Everything above was read for the commits the first listing gave. A push,
-  // a new base, or a change of draft state since then leaves the answer about
-  // a stack that no longer exists.
+  // a new base, a base branch that moved on, or a change of draft state since
+  // then leaves the answer about a stack that no longer exists.
   const now = readStack(api, repo, number);
   if (now.error) return { error: `could not confirm the stack was unchanged: ${now.error}` };
-  const shape = (pulls) => pulls.map((p) => `${p.number} ${p.head.sha} ${baseKey(p)} ${p.draft}`).join("\n");
+  const shape = (pulls) =>
+    pulls.map((p) => `${p.number} ${p.head.sha} ${baseKey(p)} ${p.base.sha} ${p.draft}`).join("\n");
   if (shape(now.data) !== shape(stack.data)) {
     return { error: "the stack changed while it was being read; run the check again" };
   }

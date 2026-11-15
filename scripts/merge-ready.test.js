@@ -12,10 +12,10 @@ const REPO = "crossroads-hq/demo";
 const CODEX = { id: 199175422, login: "chatgpt-codex-connector[bot]", type: "Bot" };
 const sha = (letter) => letter.repeat(40);
 
-const pull = (number, head, base, { draft = true, commit = sha("a"), from = REPO, merge = null } = {}) => ({
+const pull = (number, head, base, { draft = true, commit = sha("a"), from = REPO, merge = null, baseCommit = sha("0") } = {}) => ({
   number, title: `PR ${number}`, draft, merge_commit_sha: merge,
   head: { ref: head, sha: commit, repo: from === null ? null : { full_name: from } },
-  base: { ref: base, repo: { full_name: REPO, default_branch: "main" } },
+  base: { ref: base, sha: baseCommit, repo: { full_name: REPO, default_branch: "main" } },
 });
 
 const codexReview = (commit, state = "COMMENTED") => ({
@@ -187,6 +187,8 @@ test("a stack that changes while it is read gives no verdict", () => {
   for (const after of [
     [pull(7, "feature", "main", { commit: sha("b") })],
     [pull(7, "feature", "release")],
+    // Same base branch, which has moved on since it was compared.
+    [pull(7, "feature", "main", { baseCommit: sha("9") })],
     [pull(7, "feature", "main", { draft: false })],
     [pull(7, "feature", "main"), pull(8, "more", "feature")],
   ]) {
