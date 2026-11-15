@@ -173,7 +173,8 @@ function fileAt(api, repo, path, ref) {
 // A confirmed Claude fallback review of this commit: a successful "AI review"
 // job, with its evidence step passed, in a run on this commit of a workflow
 // that the default branch has calling the fleet reviewer, and that this commit
-// leaves exactly as the default branch has it. A pull request can add a
+// leaves exactly as the default branch has it, triggered by this pull request
+// on its present base. A pull request can add a
 // workflow with a job of that name, or rewrite an existing caller so a local
 // job of that name passes a step of that name; either way its copy of the file
 // differs from the trusted one, and the run proves nothing. A pull request that
@@ -185,6 +186,14 @@ function claudeReviewed(api, repo, pull) {
   for (const run of runs.data) {
     if (typeof run?.path !== "string" || !Number.isInteger(run?.id)) return { error: "a workflow run was malformed" };
     if (run.head_sha !== pull.head.sha) continue;
+    // The evidence step proves delivery to the pull request that triggered the
+    // run. Another pull request at the same commit, or this one before its base
+    // was changed, was a review of a different diff. GitHub lists no pull
+    // request on a fork's run, so that run stays unverified.
+    const forThis = Array.isArray(run.pull_requests) && run.pull_requests.some(
+      (pr) => pr?.number === pull.number && pr?.base?.ref === pull.base.ref
+    );
+    if (!forThis) continue;
     if (!trusted.has(run.path)) {
       const base = fileAt(api, repo, run.path, pull.base.repo.default_branch);
       trusted.set(
@@ -214,10 +223,28 @@ function reviewed(api, repo, pull) {
   if (reviews.error) return { ok: false, detail: `could not read reviews: ${reviews.error}` };
   const atHead = reviews.data.filter((r) => r?.commit_id === head && r?.submitted_at);
 
+  // The list is the whole history. What stands is each reviewer's latest
+  // decision: an approval followed by a request for changes is a request for
+  // changes, on whichever commit it was made, until it is dismissed or the
+  // reviewer approves again. A comment does not replace a decision.
+  const standing = new Map();
+  for (const r of reviews.data) {
+    if (!["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r?.state)) continue;
+    const who = r.user?.id;
+    const at = Date.parse(r.submitted_at);
+    if (!Number.isInteger(who) || !Number.isFinite(at)) return { ok: false, detail: "a review was malformed" };
+    if (!standing.has(who) || at >= standing.get(who).at) standing.set(who, { at, review: r });
+  }
+  const decisions = [...standing.values()].map((entry) => entry.review);
+  const refused = decisions.filter((r) => r.state === "CHANGES_REQUESTED");
+  if (refused.length > 0) {
+    return { ok: false, detail: `changes requested by ${refused.map((r) => r.user?.login).join(", ")}` };
+  }
+
   if (atHead.some((r) => isCodexBot(r.user) && SUBMITTED_STATES.has(r.state))) {
     return { ok: true, detail: "Codex reviewed this commit" };
   }
-  if (atHead.some((r) => r.user?.type === "User" && r.state === "APPROVED")) {
+  if (decisions.some((r) => r.user?.type === "User" && r.state === "APPROVED" && r.commit_id === head)) {
     return { ok: true, detail: "approved by a person on this commit" };
   }
 
@@ -284,15 +311,23 @@ function threads(graphql, repo, pull) {
   return { ok: false, detail: "review threads did not finish paging" };
 }
 
-// The newest run of the required check on this commit.
+// The newest run of the required check. Where the check also reported on the
+// pull request's test merge commit, GitHub goes by that result, so this does
+// too; otherwise the result on the head commit.
 function checks(api, repo, pull, requiredCheck) {
-  const runs = list(
-    api,
-    `repos/${repo}/commits/${pull.head.sha}/check-runs?check_name=${encodeURIComponent(requiredCheck)}&per_page=100`,
-    "check_runs"
-  );
-  if (runs.error) return { state: "unknown", detail: `could not read ${requiredCheck}: ${runs.error}` };
-  const named = runs.data.filter((r) => r?.name === requiredCheck);
+  const on = (sha) => {
+    const runs = list(
+      api,
+      `repos/${repo}/commits/${sha}/check-runs?check_name=${encodeURIComponent(requiredCheck)}&per_page=100`,
+      "check_runs"
+    );
+    return runs.error ? runs : { data: runs.data.filter((r) => r?.name === requiredCheck) };
+  };
+  let named = { data: [] };
+  if (pull.merge_commit_sha) named = on(pull.merge_commit_sha);
+  if (!named.error && named.data.length === 0) named = on(pull.head.sha);
+  if (named.error) return { state: "unknown", detail: `could not read ${requiredCheck}: ${named.error}` };
+  named = named.data;
   if (named.length === 0) return { state: "missing", detail: `${requiredCheck} has not run on this commit` };
   const latest = named.reduce((a, b) => (String(b.started_at) > String(a.started_at) ? b : a));
   if (latest.status !== "completed") return { state: "pending", detail: `${requiredCheck} is running` };
@@ -309,19 +344,25 @@ function verdict(pull, facts) {
   return facts.checks.state === "failed" ? "CHECKS FAILED" : "WAITING FOR CHECKS";
 }
 
-function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi, graphql = ghGraphql } = {}) {
+// The open pull requests, and the stack `number` is in.
+function readStack(api, repo, number) {
   const pulls = list(api, `repos/${repo}/pulls?state=open&per_page=100`);
   if (pulls.error) return { error: `could not list open pull requests: ${pulls.error}` };
   for (const p of pulls.data) {
     if (!Number.isInteger(p?.number) || !isSha(p?.head?.sha) || typeof p?.head?.ref !== "string" ||
         typeof p?.base?.ref !== "string" || typeof p?.draft !== "boolean" ||
         typeof p?.base?.repo?.full_name !== "string" ||
+        (p.merge_commit_sha != null && !isSha(p.merge_commit_sha)) ||
         (p.head.repo !== null && typeof p.head.repo?.full_name !== "string") ||
         typeof p?.base?.repo?.default_branch !== "string") {
       return { error: "an open pull request was malformed" };
     }
   }
-  const stack = stackOf(pulls.data, number);
+  return stackOf(pulls.data, number);
+}
+
+function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi, graphql = ghGraphql } = {}) {
+  const stack = readStack(api, repo, number);
   if (stack.error) return { error: stack.error };
 
   const rows = stack.data.map((pull) => {
@@ -355,6 +396,15 @@ function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi
     if (rows[i].verdict === "MERGEABLE") rows[i].verdict = "BLOCKED BELOW";
     rows[i].blockedBy = blocker;
   });
+  // Everything above was read for the commits the first listing gave. A push,
+  // a new base, or a change of draft state since then leaves the answer about
+  // a stack that no longer exists.
+  const now = readStack(api, repo, number);
+  if (now.error) return { error: `could not confirm the stack was unchanged: ${now.error}` };
+  const shape = (pulls) => pulls.map((p) => `${p.number} ${p.head.sha} ${baseKey(p)} ${p.draft}`).join("\n");
+  if (shape(now.data) !== shape(stack.data)) {
+    return { error: "the stack changed while it was being read; run the check again" };
+  }
   const ready = rows.every((row) => row.verdict === "READY TO MARK READY" || row.verdict === "MERGEABLE");
   return { rows, ready };
 }

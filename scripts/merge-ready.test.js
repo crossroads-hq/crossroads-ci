@@ -12,8 +12,8 @@ const REPO = "crossroads-hq/demo";
 const CODEX = { id: 199175422, login: "chatgpt-codex-connector[bot]", type: "Bot" };
 const sha = (letter) => letter.repeat(40);
 
-const pull = (number, head, base, { draft = true, commit = sha("a"), from = REPO } = {}) => ({
-  number, title: `PR ${number}`, draft,
+const pull = (number, head, base, { draft = true, commit = sha("a"), from = REPO, merge = null } = {}) => ({
+  number, title: `PR ${number}`, draft, merge_commit_sha: merge,
   head: { ref: head, sha: commit, repo: from === null ? null : { full_name: from } },
   base: { ref: base, repo: { full_name: REPO, default_branch: "main" } },
 });
@@ -43,13 +43,17 @@ function world({
   threadPages = [[]],
   fail = [],
 } = {}) {
+  let listings = 0;
   const api = (endpoint) => {
     if (fail.some((part) => endpoint.includes(part))) return { error: "HTTP 502" };
-    if (endpoint.includes("/pulls?state=open")) return { data: [pulls] };
+    // `pulls` may be a function of how many times the list has been read.
+    if (endpoint.includes("/pulls?state=open")) return { data: [typeof pulls === "function" ? pulls(listings++) : pulls] };
     if (endpoint.includes("/compare/")) return { data: { behind_by: typeof behind === "function" ? behind(endpoint) : behind } };
     if (endpoint.includes("/reviews")) return { data: [reviews] };
     if (endpoint.includes("/issues/")) return { data: [comments] };
-    if (endpoint.includes("/check-runs")) return { data: [{ check_runs: checkRuns }] };
+    if (endpoint.includes("/check-runs")) {
+      return { data: [{ check_runs: typeof checkRuns === "function" ? checkRuns(endpoint) : checkRuns }] };
+    }
     if (endpoint.includes("/jobs")) return { data: [{ jobs: jobs[endpoint.match(/runs\/(\d+)\/jobs/)[1]] || [] }] };
     if (endpoint.includes("/actions/runs?head_sha=")) return { data: [{ workflow_runs: runs }] };
     if (endpoint.includes("/contents/")) {
@@ -152,6 +156,46 @@ test("a person's approval of this commit is a review; their comment is not", () 
   assert.equal(one({ reviews: [by("APPROVED", sha("b"))] }).verdict, "NOT READY");
 });
 
+test("a reviewer's latest decision is the one that stands", () => {
+  const person = { id: 5, login: "owner", type: "User" };
+  const by = (state, time, commit = sha("a")) => ({ id: time, user: person, commit_id: commit, state, submitted_at: `2026-11-14T20:0${time}:00Z` });
+  // Approved, then asked for changes on the same commit: not approved.
+  let row = one({ reviews: [by("APPROVED", 1), by("CHANGES_REQUESTED", 2)] });
+  assert.equal(row.verdict, "NOT READY");
+  assert.match(row.facts.reviewed.detail, /changes requested by owner/);
+  // A request for changes on an earlier commit still stands, whoever else reviewed this one.
+  assert.equal(one({ reviews: [by("CHANGES_REQUESTED", 1, sha("b")), codexReview(sha("a"))] }).verdict, "NOT READY");
+  // Asked for changes, then approved; a later comment does not undo the approval.
+  assert.equal(one({ reviews: [by("CHANGES_REQUESTED", 1), by("APPROVED", 2), by("COMMENTED", 3)] }).verdict, "READY TO MARK READY");
+  // The request was dismissed: it no longer blocks, and it is not an approval.
+  assert.equal(one({ reviews: [by("DISMISSED", 1), codexReview(sha("a"))] }).verdict, "READY TO MARK READY");
+  assert.equal(one({ reviews: [by("APPROVED", 1), by("DISMISSED", 2)] }).verdict, "NOT READY");
+});
+
+test("the required check on the test merge commit decides, where it reported there", () => {
+  const pulls = [pull(7, "feature", "main", { draft: false, merge: sha("e") })];
+  const run = (conclusion) => ({ name: "PR Validation", status: "completed", conclusion, started_at: "2026-11-14T20:00:00Z" });
+  const at = (onHead, onMerge) => (endpoint) => (endpoint.includes(sha("e")) ? onMerge : onHead);
+  assert.equal(one({ ...REVIEWED, pulls, checkRuns: at([run("success")], [run("failure")]) }).verdict, "CHECKS FAILED");
+  assert.equal(one({ ...REVIEWED, pulls, checkRuns: at([run("failure")], [run("success")]) }).verdict, "MERGEABLE");
+  // Nothing reported on the test merge commit: the head's result.
+  assert.equal(one({ ...REVIEWED, pulls, checkRuns: at([run("success")], []) }).verdict, "MERGEABLE");
+});
+
+test("a stack that changes while it is read gives no verdict", () => {
+  const before = [pull(7, "feature", "main")];
+  for (const after of [
+    [pull(7, "feature", "main", { commit: sha("b") })],
+    [pull(7, "feature", "release")],
+    [pull(7, "feature", "main", { draft: false })],
+    [pull(7, "feature", "main"), pull(8, "more", "feature")],
+  ]) {
+    const result = assess({ repo: REPO, number: 7 }, world({ ...REVIEWED, pulls: (n) => (n === 0 ? before : after) }));
+    assert.match(result.error, /changed while it was being read/);
+    assert.equal(result.rows, undefined);
+  }
+});
+
 test("a dismissed Codex review of this commit makes a completed summary row count for nothing", () => {
   const summary = {
     user: CODEX,
@@ -164,7 +208,10 @@ test("a dismissed Codex review of this commit makes a completed summary row coun
 test("the Claude fallback counts only from a workflow the base branch has calling the fleet reviewer", () => {
   const job = { name: "ai-review / AI review", conclusion: "success", steps: [{ name: "Confirm a review actually reached the pull request", conclusion: "success" }] };
   const calls = "uses: crossroads-hq/crossroads-ci/.github/workflows/_ai-review.yml@68a5403e";
-  const run = { id: 11, path: ".github/workflows/validate.yml", head_sha: sha("a") };
+  const run = {
+    id: 11, path: ".github/workflows/validate.yml", head_sha: sha("a"),
+    pull_requests: [{ number: 7, base: { ref: "main" } }],
+  };
   const setup = (extra) => ({ runs: [run], jobs: { 11: [job] }, ...extra });
 
   assert.equal(one(setup({ workflows: { ".github/workflows/validate.yml": calls } })).verdict, "READY TO MARK READY");
@@ -189,6 +236,14 @@ test("the Claude fallback counts only from a workflow the base branch has callin
     one(setup({ workflows: { ".github/workflows/validate.yml": calls }, runs: [{ ...run, head_sha: sha("b") }] })).verdict,
     "NOT READY"
   );
+  // The run reviewed another pull request at the same commit, or this one on
+  // another base, or GitHub does not say which.
+  for (const pull_requests of [[{ number: 8, base: { ref: "main" } }], [{ number: 7, base: { ref: "release" } }], [], undefined]) {
+    assert.equal(
+      one(setup({ workflows: { ".github/workflows/validate.yml": calls }, runs: [{ ...run, pull_requests }] })).verdict,
+      "NOT READY"
+    );
+  }
   // The job succeeded without its evidence step: it skipped, it did not review.
   assert.equal(
     one(setup({ workflows: { ".github/workflows/validate.yml": calls }, jobs: { 11: [{ ...job, steps: [] }] } })).verdict,
