@@ -16,7 +16,8 @@
 //
 // A pull request with the first three is READY TO MARK READY while it is a
 // draft, so the long build runs once, on a commit already reviewed. With all
-// four, and not a draft, it is MERGEABLE. A fix pushed after a review makes a
+// four, and not a draft, it is MERGEABLE, unless a pull request below it in
+// the stack is not: then it is BLOCKED BELOW. A fix pushed after a review makes a
 // new commit, which needs its own review: that is what "every fix reviewed
 // again" means here.
 //
@@ -304,6 +305,18 @@ function assess({ repo, number, requiredCheck = "PR Validation" }, { api = ghApi
       verdict: verdict(pull, facts),
     };
   });
+  // A pull request merges only after every one below it. Its own green build
+  // does not make it mergeable while a lower one is still waiting, and GitHub
+  // shows that as "blocked downstack".
+  let below = null;
+  for (const row of rows) {
+    if (row.verdict === "MERGEABLE" && below !== null) {
+      row.verdict = "BLOCKED BELOW";
+      row.blockedBy = below;
+    } else if (row.verdict !== "MERGEABLE" && below === null) {
+      below = row.number;
+    }
+  }
   const ready = rows.every((row) => row.verdict === "READY TO MARK READY" || row.verdict === "MERGEABLE");
   return { rows, ready };
 }
@@ -317,6 +330,7 @@ function render({ rows, ready }) {
       for (const link of row.facts[name].links || []) lines.push(`           ${link}`);
     }
     lines.push(`    ${row.facts.checks.state === "passed" ? "ok  " : "--  "} checks: ${row.facts.checks.detail}`);
+    if (row.blockedBy) lines.push(`    --   below: waits for #${row.blockedBy}, lower in the stack`);
   }
   lines.push("");
   if (ready) lines.push(`All ${rows.length} pull request(s): ready.`);
@@ -324,6 +338,7 @@ function render({ rows, ready }) {
     ["Not ready", "NOT READY"],
     ["Checks failed", "CHECKS FAILED"],
     ["Waiting for checks", "WAITING FOR CHECKS"],
+    ["Blocked by a lower pull request", "BLOCKED BELOW"],
   ]) {
     const numbers = rows.filter((r) => r.verdict === name).map((r) => `#${r.number}`);
     if (numbers.length > 0) lines.push(`${label}: ${numbers.join(", ")}.`);

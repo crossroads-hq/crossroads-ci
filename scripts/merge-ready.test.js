@@ -221,6 +221,27 @@ test("a stack is read bottom first from any of its pull requests, each against t
   assert.match(render(result), /Not ready: #11\.$/);
 });
 
+test("a green pull request above one still building is blocked below, not mergeable", () => {
+  const pulls = [
+    pull(10, "bottom", "main", { draft: false, commit: sha("a") }),
+    pull(11, "middle", "bottom", { draft: false, commit: sha("b") }),
+    pull(12, "top", "middle", { draft: false, commit: sha("c") }),
+  ];
+  const passed = { name: "PR Validation", status: "completed", conclusion: "success", started_at: "2026-11-14T20:00:00Z" };
+  const setup = { pulls, reviews: [codexReview(sha("a")), codexReview(sha("b")), codexReview(sha("c"))] };
+  const base = world(setup);
+  // Only the middle pull request's build has not finished.
+  const api = (endpoint) =>
+    endpoint.includes("/check-runs")
+      ? { data: [{ check_runs: endpoint.includes(sha("b")) ? [] : [passed] }] }
+      : base.api(endpoint);
+  const result = assess({ repo: REPO, number: 12 }, { api, graphql: base.graphql });
+  assert.deepEqual(result.rows.map((r) => r.verdict), ["MERGEABLE", "WAITING FOR CHECKS", "BLOCKED BELOW"]);
+  assert.equal(result.rows[2].blockedBy, 11);
+  assert.equal(result.ready, false);
+  assert.match(render(result), /Blocked by a lower pull request: #12\.$/);
+});
+
 test("two open pull requests on one branch make the stack ambiguous", () => {
   assert.match(stackOf([pull(1, "same", "main"), pull(2, "same", "main")], 1).error, /ambiguous/);
 });
