@@ -175,12 +175,32 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Determine allowed skips
+        id: allowed-skips
+        shell: bash
+        env:
+          WORKFLOW_CHANGED: ${{ needs.changes.outputs.workflow }}
+          SCRIPTS_CHANGED: ${{ needs.changes.outputs.scripts }}
+        run: |
+          # Only a PR's explicit non-match can excuse a skip. Missing or
+          # malformed filter output must not excuse either job.
+          {
+            echo 'jobs<<EOF'
+            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+              if [[ "$WORKFLOW_CHANGED" == false ]]; then
+                echo 'Workflow lint'
+              fi
+              if [[ "$SCRIPTS_CHANGED" == false ]]; then
+                echo 'Scripts'
+              fi
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check required results
         uses: ./actions/gate
         with:
-          allow-skipped: |
-            Workflow lint
-            Scripts
+          allow-skipped: ${{ steps.allowed-skips.outputs.jobs }}
           # "Detect changes" is REQUIRED, deliberately absent from
           # allow-skipped: it carries no `if:`, so it never legitimately skips.
           # Omitting it entirely -- as this gate did until now -- was a hole.
