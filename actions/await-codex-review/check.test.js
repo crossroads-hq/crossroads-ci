@@ -210,6 +210,38 @@ test("accepts an official clean verdict with a varying same-line suffix", () => 
   assert.equal(result.output.reason, "codex-clean-comment-found");
 });
 
+// The body Codex has posted since 2026-10-16, copied from
+// crossroads-evolution#789 with the commit swapped for the test head.
+test("accepts a clean verdict that opens with the Codex receipt marker", () => {
+  const result = run({
+    comments: [[[
+      cleanReviewComment({
+        body: "<!-- codex-review-receipt:v1 -->\n\nCodex Review: Didn't find any major issues. Can't wait for the next one!\n\n**Reviewed commit:** `0123456789`\n\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n<br/>\n</details>",
+      }),
+    ]]],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.output.reviewed, "true");
+  assert.equal(result.output.reason, "codex-clean-comment-found");
+});
+
+test("does not accept a receipt marker followed by anything but a verdict", () => {
+  for (const body of [
+    // A usage-limit notice is Codex saying it did not review.
+    "<!-- codex-review-receipt:v1 -->\n\nYou have reached your Codex usage limits for code reviews. You can see your limits in the Codex usage dashboard.",
+    "You have reached your Codex usage limits for code reviews.\n\n**Reviewed commit:** `0123456789`",
+    // The marker counts once, at the very start.
+    "<!-- codex-review-receipt:v1 -->\n\n<!-- codex-review-receipt:v1 -->\n\nCodex Review: Didn't find any major issues.\n\n**Reviewed commit:** `0123456789`",
+    "Note\n\n<!-- codex-review-receipt:v1 -->\n\nCodex Review: Didn't find any major issues.\n\n**Reviewed commit:** `0123456789`",
+  ]) {
+    const result = run({ comments: [[[cleanReviewComment({ body })]]] });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.output.reviewed, "false", body);
+  }
+});
+
 test("does not accept a Codex clean-review comment for an older head", () => {
   const result = run({
     comments: [[[

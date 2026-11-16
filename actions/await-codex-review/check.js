@@ -1,9 +1,7 @@
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
-const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
-const CODEX_USER_ID = 199175422;
-const SUBMITTED_STATES = new Set(["COMMENTED", "APPROVED", "CHANGES_REQUESTED"]);
+const { SUBMITTED_STATES, isCodexBot, reviewedCommits, timestamp } = require("./evidence.js");
 
 function fail(message) {
   console.error(message);
@@ -96,11 +94,6 @@ function resolveCommit(abbreviatedSha) {
   }
 }
 
-function timestamp(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)) return NaN;
-  return Date.parse(value);
-}
-
 function dismissalBoundary(reviews) {
   const proc = spawnSync("gh", [
     "api", `repos/${process.env.REPO}/issues/${process.env.PR}/events`,
@@ -133,38 +126,6 @@ function dismissalBoundary(reviews) {
   } catch (error) {
     return { error: `GitHub events response was not valid JSON: ${error.message}` };
   }
-}
-
-function isCodexBot(user) {
-  return (
-    user?.id === CODEX_USER_ID &&
-    user?.login === CODEX_LOGIN &&
-    user?.type === "Bot"
-  );
-}
-
-const SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->";
-
-// Every commit a Codex comment vouches for, with the reason to report. Two
-// formats: the older one-line clean verdict, and the summary table Codex
-// edits in place (first seen on crossroads-ci#67, 2026-09-29), where a
-// "Code Review" row marked Completed means Codex finished reviewing that
-// commit. Findings still arrive as a formal review, caught before this.
-function reviewedCommits(body) {
-  if (typeof body !== "string") return [];
-  const clean = body.match(
-    /^Codex Review: Didn't find any major issues\.[^\r\n]*\r?\n\r?\n\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`(?:\r?\n|$)/
-  )?.[1];
-  if (clean) return [{ sha: clean, reason: "codex-clean-comment-found" }];
-  if (!body.startsWith(SUMMARY_MARKER)) return [];
-  return [
-    ...body.matchAll(
-      /^\| [^|\r\n]*\*\*Code Review\*\* \| ✅ \*\*Completed\*\*([^|\r\n]*)\| `([0-9a-f]{7,40})` \|/gm
-    ),
-  ].map((m) => ({
-    sha: m[2], reason: "codex-summary-completed",
-    completedAt: timestamp(m[1].match(/<relative-time datetime="([^"]+)"/)?.[1]),
-  }));
 }
 
 for (const name of ["REPO", "PR", "HEAD_SHA", "GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]) {
