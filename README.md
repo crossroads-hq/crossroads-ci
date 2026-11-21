@@ -1,5 +1,8 @@
 # crossroads-ci
 
+The disabled [HQ-085 durable shadow controller](docs/ci-admission-shadow.md) adds
+local SQLite decisions/replay with no production effects.
+
 The inactive [HQ-085 admission contracts](docs/ci-admission-contracts.md) contain
 pure model primitives and deterministic fixtures. They introduce no controller,
 workflow integration or pilot activation.
