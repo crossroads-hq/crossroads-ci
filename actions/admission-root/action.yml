@@ -1,0 +1,10 @@
+name: CI admission root
+description: Verify an exact launch permit without checking out consumer code. Source-only; enrollment disabled.
+runs:
+  using: composite
+  steps:
+    - name: Verify launch before dependents
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: node "$GITHUB_ACTION_PATH/../admission/verify.mjs" launch

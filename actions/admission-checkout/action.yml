@@ -1,0 +1,10 @@
+name: CI admission checkout verification
+description: Verify a fresh actual-job permit as the first heavy step before checkout. Source-only; enrollment disabled.
+runs:
+  using: composite
+  steps:
+    - name: Verify exact job before checkout
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: node "$GITHUB_ACTION_PATH/../admission/verify.mjs" checkout

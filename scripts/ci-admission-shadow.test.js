@@ -51,6 +51,54 @@ async function rig(t, file = ':memory:') {
 const queue = (r, i = input(), x = execution(i), mode = 'initial', now = T) => r.send('queue',
   { input: i, execution: x, readyAt: T - 1000, mandatory: i.workload !== 'AI', mode }, now);
 
+test('complete bind cannot discard an observed heavy ID or later substitute it', async t => {
+  const r = await rig(t), i = input(), x = execution(i); queue(r, i);
+  r.send('decide', { frame: frame([i]) });
+  const jobs = list([job(x, 1000, 'root'), job(x, 1001, 'heavy')]);
+  assert.throws(() => r.send('bind', { generation: 1, execution: x, jobs }), /Unknown/);
+  r.send('bind', { generation: 1, execution: { ...x, heavyJobId: 1001 }, jobs });
+  assert.throws(() => r.send('bind', { generation: 1, execution: { ...x, heavyJobId: 1002 },
+    jobs: list([job(x, 1000, 'root'), job(x, 1002, 'heavy')]) }), /Unknown/);
+});
+
+test('null actual ledger ID never creates known zero accounting', async t => {
+  const r = await rig(t), i = input(); queue(r, i); r.send('decide', { frame: frame([i]) });
+  assert.throws(() => r.send('ledger', { generation: 1, jobId: null,
+    runnerType: 'self-hosted', createdAt: T, startedAt: T, completedAt: T, roundedMinutes: 0 }), /Unknown/);
+  assert.equal(r.c.snapshot(T).accounting.status, 'Unknown');
+  assert.deepEqual(r.c.snapshot(T).ledger, []);
+});
+
+test('replacing queued execution cannot transfer owner authority to a different run', async t => {
+  const r = await rig(t), i = input(); queue(r, i); r.send('owner', ownerCheck(i, T));
+  assert.throws(() => queue(r, i, execution(i, 200, 1, 3000), 'recovery'), /Unknown/);
+  assert.equal(r.c.snapshot(T).inputs[0].execution.runId, 100);
+});
+
+test('each permit rechecks retained feasibility without requiring an extra free slot', async t => {
+  for (const phase of ['launch', 'checkout']) for (const change of ['unmanaged', 'shrink']) {
+    const r = await rig(t), i = input(), f = frame([i]); queue(r, i);
+    f.capacity.groups[0].slots = change === 'shrink' ? 2 : 1;
+    r.send('decide', { frame: f });
+    if (phase === 'checkout') {
+      r.send('permit', { generation: 1, phase: 'launch', checkId: 500, appId: 900, frame: f });
+      const x = { ...execution(i), heavyJobId: 1001 };
+      r.send('bind', { generation: 1, execution: x,
+        jobs: list([job(x, 1000, 'root'), job(x, 1001, 'heavy')]) });
+    }
+    const bad = structuredClone(f);
+    bad.capacity.jobs = [{ id: 9999, runnerId: 19, generation: null }];
+    if (change === 'shrink') bad.capacity.groups[0].slots = 1;
+    const before = r.c.snapshot(T);
+    assert.throws(() => r.send('permit', { generation: 1, phase,
+      checkId: phase === 'launch' ? 500 : 501, appId: 900, frame: bad }), /Unknown/);
+    assert.deepEqual(r.c.snapshot(T), before);
+    // Fully reserved, feasible capacity still permits its already-reserved job.
+    f.capacity.groups[0].slots = 1;
+    r.send('permit', { generation: 1, phase, checkId: phase === 'launch' ? 500 : 501, appId: 900, frame: f });
+  }
+});
+
 // A missing module is an expected red-phase failure, not silently skipped proof.
 test('SQLite decisions are disabled, idempotent and survive a real close/reopen', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'admission-shadow-')); t.after(() => rmSync(dir, { recursive: true }));
