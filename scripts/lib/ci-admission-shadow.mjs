@@ -97,12 +97,14 @@ function capacity(s, c, now, repoId) {
   }
   const runners = c.runners.filter(r => r.online && r.labels.includes('fast') && r.repoIds.includes(repoId));
   const groups = c.groups.filter(g => runners.some(r => r.groupId === g.id));
-  if (!groups.length) return 0;
+  if (!groups.length) return -1;
   const room = groups.map(g => {
     const unmanaged = c.jobs.filter(j => j.generation === null && c.runners.find(r => r.id === j.runnerId).groupId === g.id).length;
     return Math.min(g.slots, runners.filter(r => r.groupId === g.id).length) - unmanaged - reservations.length;
   });
-  return Math.max(0, Math.min(CANDIDATES.managedFast - reservations.length, ...room));
+  // Zero means fully reserved but feasible; negative means retained obligations
+  // no longer fit. Publication must distinguish these two states.
+  return Math.min(CANDIDATES.managedFast - reservations.length, ...room);
 }
 function accounting(s) {
   const unknown = !s.ledger.length || s.ledger.some(j => j.roundedMinutes === null || j.day === null || j.runnerType === 'unknown');
@@ -134,7 +136,7 @@ function current(r, f, g) {
 function ownerCurrent(s, r, f, now) {
   if (!r.ownerKey) return null;
   const request = s.requests.find(q => q.key === r.ownerKey);
-  if (!request || request.fulfilled || !Array.isArray(f.ownerChecks)) return false;
+  if (!request || !sameRun(request.request, r.execution) || request.fulfilled || !Array.isArray(f.ownerChecks)) return false;
   const observations = f.ownerChecks.map(check => ownerRequests(check.observation, check.expected, now));
   if (observations.some(value => value.status !== 'Known')) return false;
   const matches = observations.flatMap(value => value.items);
@@ -187,7 +189,7 @@ function choose(s, f, now) {
       groups.sort((a, b) => order(a[0], b[0]));
       const r = groups[0]?.sort((a, b) => Number(b.mandatory) - Number(a.mandatory) || order(a, b))[0];
       if (!r) continue;
-      if (initialAuthority(s, r) || !capacity(s, f.capacity, now, r.input.repoId)) continue;
+      if (initialAuthority(s, r) || capacity(s, f.capacity, now, r.input.repoId) <= 0) continue;
       if (r.mode === 'recovery' && active(s).some(o => sameRun(o.execution, r.execution))) continue;
       ensure(s.obligations.length < MAX_RECORDS && id(s.generation + 1));
       const generation = ++s.generation;
@@ -225,7 +227,7 @@ function bind(s, c, now) {
     c.jobs.items.filter(j => j.role === 'root' && j.workload === o.input.workload).length === 1 &&
     c.jobs.items.filter(j => j.role === 'heavy' && j.workload === o.input.workload).length <= 1 &&
     c.jobs.items.some(j => j.id === x.rootJobId && j.role === 'root' && j.workload === o.input.workload) &&
-    (x.heavyJobId === null || c.jobs.items.some(j => j.id === x.heavyJobId && j.role === 'heavy' && j.workload === o.input.workload)));
+    (c.jobs.items.find(j => j.role === 'heavy' && j.workload === o.input.workload)?.id ?? null) === x.heavyJobId);
   ensure(!s.obligations.some(other => other.generation !== o.generation &&
     [other.execution.rootJobId, other.execution.heavyJobId].filter(id).some(n => [x.rootJobId, x.heavyJobId].includes(n)) && other.execution.repoId === x.repoId));
   ensure(!o.checkout && o.phase !== 'Active');
@@ -236,6 +238,7 @@ function permit(s, c, now) {
   const o = byGeneration(s, c.generation), p = prerequisites(s, c.frame, now);
   ensure(!p.reason && c.frame.safety.activation.id === o.activationId && current(record(s, o.key), c.frame, p.g) && ownerCurrent(s, record(s, o.key), c.frame, now) !== false &&
     ['none', 'confirmed'].includes(o.mutation) && c.appId === o.appId && c.frame.schedulerAppId === o.appId && id(c.checkId) && ['launch', 'checkout'].includes(c.phase));
+  ensure(active(s).every(q => capacity(s, c.frame.capacity, now, q.input.repoId) >= 0));
   ensure(!s.obligations.some(q => [q.launch?.id, q.checkout?.id].includes(c.checkId)));
   if (c.phase === 'launch') ensure(!o.launch && o.phase === 'Reserved' && o.execution.heavyJobId === null && now - o.reservedAt <= CANDIDATES.evidenceMs);
   else ensure(o.launch && !o.checkout && o.phase !== 'Held' && id(o.execution.heavyJobId) &&
@@ -286,6 +289,7 @@ function transition(s, c) {
       ensure(i.repoId === x.repoId && clock(c.readyAt) && c.readyAt <= now && typeof c.mandatory === 'boolean' && ['initial', 'recovery'].includes(c.mode));
       let r = s.inputs.find(r => r.key === key);
       ensure(!active(s).some(o => o.key === key));
+      if (r?.ownerKey) ensure(sameRun(s.requests.find(q => q.key === r.ownerKey)?.request ?? {}, x));
       ensure(c.mode !== 'initial' || !s.obligations.some(o => o.key === key && sameRun(o.origin, x) && o.origin.attempt === x.attempt));
       if (!r) { ensure(s.inputs.length < MAX_RECORDS); r = { key, input: i, readyAt: c.readyAt,
         intentCreatedAt: now, success: false, failureLatched: false, successExecution: null, ownerKey: null }; s.inputs.push(r); }
@@ -322,7 +326,7 @@ function transition(s, c) {
     }
     case 'settle': return settle(s, c, now);
     case 'ledger': {
-      const o = s.obligations.find(o => o.generation === c.generation); ensure(o && [o.execution.rootJobId, o.execution.heavyJobId].includes(c.jobId) &&
+      const o = s.obligations.find(o => o.generation === c.generation); ensure(o && id(c.jobId) && [o.execution.rootJobId, o.execution.heavyJobId].includes(c.jobId) &&
         ['hosted', 'self-hosted', 'unknown'].includes(c.runnerType) && clock(c.createdAt) && clock(c.startedAt) && clock(c.completedAt) &&
         c.createdAt <= c.startedAt && c.startedAt <= c.completedAt && c.completedAt <= now &&
         (c.roundedMinutes === null || (Number.isSafeInteger(c.roundedMinutes) && c.roundedMinutes >= 0)) &&
