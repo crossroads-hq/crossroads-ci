@@ -1,0 +1,3 @@
+3fbf017718042d050bfe2c2ed573c1c9caaa072a4fe1d78fa4fe0420c6885d96  scripts/lib/ci-admission-shadow.mjs
+552e2a246801b0bfb9216264af0bbb99c98a930b26bdb8b8a80a3d89d102d484  scripts/lib/ci-admission-writer.mjs
+3be07857e0afc1aa08c556386a12f0880c8d89b34fbaf20f5055ab0a59235c65  scripts/ci-admission-writer.test.js

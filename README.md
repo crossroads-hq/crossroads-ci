@@ -1,5 +1,8 @@
 # crossroads-ci
 
+The [HQ-085 disabled permit/recovery writer](docs/ci-admission-writer.md) adds
+transactional write intents and reconciliation fixtures without an executor.
+
 The disabled [HQ-085 durable shadow controller](docs/ci-admission-shadow.md) adds
 local SQLite decisions/replay with no production effects.
 
