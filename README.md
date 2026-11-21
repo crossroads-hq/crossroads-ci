@@ -1,5 +1,9 @@
 # crossroads-ci
 
+The inactive [HQ-085 admission contracts](docs/ci-admission-contracts.md) contain
+pure model primitives and deterministic fixtures. They introduce no controller,
+workflow integration or pilot activation.
+
 The Crossroads fleet's CI control plane. Everything that defines what a
 Crossroads repository *is* — its branch protection, its shared workflow
 logic, its supply-chain checks — lives here, once, instead of copy-pasted

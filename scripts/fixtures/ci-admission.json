@@ -1,0 +1,58 @@
+{
+  "contractVersion": 1,
+  "kind": "pure-model-and-future-replay-expectations",
+  "recovery": [
+    { "id": "held-before-checkout", "patch": {}, "status": "Eligible" },
+    { "id": "same-input-second-run-success", "patch": { "success": true, "runId": 101, "policy": "next" }, "status": "Held" },
+    { "id": "genuine-failure-then-held", "patch": { "failureLatched": true, "phase": "Held", "attempt": 9 }, "status": "Held" },
+    { "id": "recovery-three", "patch": { "dailyRecoveries": 3 }, "status": "Held" },
+    { "id": "unknown-recovery-count", "patch": { "dailyRecoveries": null }, "status": "Unknown" }
+  ],
+  "futureReplay": [
+    {
+      "id": "native-partial-recovery", "ownerStories": [3, 6, 8, 10],
+      "events": ["Verify held", "run terminal", "reserve and persist root rerun intent", "Verify succeeds attempt 2", "Storybook held", "whole run terminal", "Storybook succeeds attempt 3"],
+      "expect": ["Verify success stays attributed to attempt 2 and original job IDs", "only targeted root and dependents rerun", "all mandatory native evidence required by PR Validation"],
+      "proof": "Model predicates exercised here; GitHub native semantics require later separately authorized drill."
+    },
+    {
+      "id": "durable-permits-and-mutations", "ownerStories": [3, 6, 8],
+      "events": ["reserve before rerun", "intent persisted", "lost response", "restart", "lease expires", "new attempt observed", "old actual heavy job still active"],
+      "expect": ["unresolved intent blocks further write", "capacity remains reserved", "no duplicate check/generation", "no permit renewal after two-minute launch deadline", "complete exact terminal reconciliation alone releases"],
+      "proof": "Predicate faults exercised; transactional persistence and external-write reconciliation deferred."
+    },
+    {
+      "id": "owner-race-reentries", "ownerStories": [3, 8],
+      "events": ["owner attempt 2 reruns successful Verify root", "App and owner race for next attempt", "App attempt 3 held", "App attempt 4 held"],
+      "expect": ["one durable request keyed by originating owner attempt/root", "at most three controller reentries including claim races", "App inherits request and cannot create fresh genuine-failure authorization", "current permissions and original refs rechecked before every new write", "ready time retained"],
+      "proof": "Owner scope and counters exercised; serializable claims and inheritance deferred."
+    },
+    {
+      "id": "stack-round-robin", "ownerStories": [3],
+      "graph": [
+        { "repoId": 1305651079, "pr": 42, "headRef": "parent", "baseRef": "main", "readyAt": 1000 },
+        { "repoId": 1305651079, "pr": 43, "headRef": "child", "baseRef": "parent", "readyAt": 2000 },
+        { "repoId": 1318535693, "pr": 50, "headRef": "other", "baseRef": "main", "readyAt": 1000 }
+      ],
+      "expect": ["unique same-repo open-head links only", "ambiguity/cycles/incomplete graph hold", "42 Verify before 43 Verify", "one workload per stack per pass; 50 can be between 42 and 43", "43 may use spare capacity before admitted 42 passes", "failed 42 without authorized retry is not pending", "mandatory before advisory AI", "cursor survives restart; oldest ready then numeric repo/PR/workload tie-break"],
+      "proof": "Deterministic replay input/expectations only; graph/fairness algorithm owned by Story 3."
+    },
+    {
+      "id": "shared-capacity", "ownerStories": [3, 4],
+      "repoIds": [1318535693, 1305651079], "managedCeilingCandidate": 2,
+      "runners": [
+        { "id": 19, "labels": ["fast", "light"], "physicalGroup": "wsl" },
+        { "id": 20, "labels": ["fast"], "physicalGroup": "wsl" },
+        { "id": 21, "labels": ["fast"], "physicalGroup": "wsl" }
+      ],
+      "expect": ["two reservations across BOTH repos leave zero managed slots", "runner 19 counts once despite two labels", "reservation and bound active job count once", "fresh unmanaged/shared-light occupancy reduces physical room", "unknown topology/eligibility/occupancy or incomplete pagination holds", "no physical independence, dispatch order or queue-rank inference"],
+      "proof": "Topology identities/expectations only; no live runner availability or capacity algorithm is asserted."
+    },
+    {
+      "id": "billing-and-safety", "ownerStories": [3, 8, 9, 10],
+      "events": ["unexpected hosted job", "missing billing", "job straddles Jerusalem midnight", "DST change", "pause", "seven elapsed days expire", "App revoked before drain"],
+      "expect": ["unknown minutes never zero", "unexpected hosted stays pilot usage", "600 total/day across both repos; 4200 total candidate", "each job rounded up; cross-date allocation policy must be fixed and tested before activation", "self-hosted enrollment requires complete zero-hosted closure; no hosted reservations", "pause never extends expiry", "drain and rollback retain unresolved obligations without cancellation", "source-bound gate and zero-hosted nested closure audited later"],
+      "proof": "Safety/day predicates exercised; billable lifecycle allocation, structural audit and live rollback are deferred blockers."
+    }
+  ]
+}
