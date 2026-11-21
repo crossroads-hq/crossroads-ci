@@ -1,0 +1,4 @@
+# Existing fleet labels used by the dormant HQ-085 AI entry.
+# This declares lint vocabulary only; it does not configure a runner or enroll it.
+self-hosted-runner:
+  labels: [light, fast]

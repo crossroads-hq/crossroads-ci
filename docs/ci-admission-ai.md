@@ -124,7 +124,7 @@ draft after completion. No pre-push hook execution is assumed.
 
 ## Completed local validation
 
-Full explicit local push gate passed: **289 tests**, zero failures/skips
+Initial explicit local push gate passed: **289 tests**, zero failures/skips
 (156 script, 92 action, 41 runner-host). Focused AI/native/Codex suite: 107
 passed, zero failures/skips. All workflows parsed, new JavaScript syntax and
 cached diff checks passed; all nine inherited Story 6 source hashes matched.
@@ -171,3 +171,44 @@ AI token-scope blocker. Do not enable the writer or provision anything. Then
 continue serial one-story/new-chat/draft through Story 10, which stops with the
 whole inventory and owner gates. Owner already authorized that continuation;
 no merge wait or new split decision is required.
+
+## Remote lint correction recorded before implementation
+
+Initial draft head `b65327b3dbea763b5eb00162bf4ab2d1599d7e6c` exposed a
+local coverage gap: Docker/pipx-based optional lint had been unavailable.
+Remote run `44875234042`, workflow-lint job `136758395974`, failed because
+literal self-hosted `light`/`fast` labels were not declared in this repository's
+lint configuration. Existing workflows use expression selectors, which did
+not expose this check. Exact actionlint 1.7.12 reproduced both unknown-label
+errors locally (`/tmp/ci-ai-actionlint-red.log`). Add only those two existing
+fleet label declarations in `.github/actionlint.yaml`, using upstream's
+supported self-hosted-runner labels schema, without ignored findings, wildcard
+labels, gate changes, runner edits or activation. Preserve the published commit;
+deliver the correction as another locally signed commit on this same draft.
+Temporary actionlint 1.7.12 and zizmor 1.11.0 macOS binaries were verified
+against their official release-asset SHA-256 digests before use; they change
+no system installation. Follow-up lint/full-gate/review receipts are posted
+after execution.
+
+## Arrived service finding recorded before correction
+
+Codex review `6003486442` at initial head `b65327b3dbea763b5eb00162bf4ab2d1599d7e6c`
+reported P2 `discussion_r4651087583`: reviewer-workflow-only changes set the
+workflow filter but not the scripts filter, so the new generated-equivalence
+test could be skipped. The earlier independent no-findings review did not
+catch this coverage defect; it is not a clean service verdict. Add an exact
+filter regression, observe failure, then include both reviewer workflow paths
+in the existing scripts filter. Keep every gate need/result, skip predicate,
+name and `!cancelled()` condition unchanged. No predecessor branch is touched.
+
+
+Corrected final local evidence: **290 tests passed**, zero failures/skips
+(157 scripts, 92 actions, 41 runner-host); **108 focused passed**. Logs:
+`/tmp/ci-ai-final-preflight.log`, `/tmp/ci-ai-final-scripts.log`,
+`/tmp/ci-ai-final-focused.log`. The existing preflight still reports its
+Docker/pipx lint wrappers unavailable; separately executed exact-version
+**actionlint 1.7.12 passed** and **zizmor 1.11.0 offline/high passed**.
+The latter does not claim online audit coverage. The new filter regression
+passed after its recorded red result; generation/syntax/hash/diff checks stay
+clean. No required gate logic or existing reviewer is changed. The final
+separate-agent correction verdict and GitHub receipts follow on this draft.

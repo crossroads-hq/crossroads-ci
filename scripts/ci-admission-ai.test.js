@@ -155,3 +155,14 @@ test('drift check detects a changed generated workflow and a changed owner workf
   assert.notEqual(render(legacyText), admittedText.replace(pin, '0'.repeat(40)));
   assert.throws(() => render(legacyText.replace('    steps:', '    removed-steps:')), /owner workflow/);
 });
+
+
+test('reviewer-workflow-only changes select the script suite containing the drift check', () => {
+  const ci = parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8'));
+  const filter = ci.jobs.changes.steps.find(s => s.id === 'filter');
+  const paths = parse(filter.with.filters).scripts;
+  for (const path of ['.github/workflows/_ai-review.yml', '.github/workflows/_ai-review-admission.yml']) {
+    assert.ok(paths.includes(path), `${path} must run script drift tests without other changed files`);
+  }
+  assert.match(ci.jobs.scripts.if, /needs\.changes\.outputs\.scripts == 'true'/);
+});
