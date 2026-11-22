@@ -1,0 +1,45 @@
+name: Crossroads queue wait
+description: >-
+  Writes a per-job table of runner queue wait (job created to job started)
+  next to run time into the run summary, and emits a warning annotation for
+  any wait above warn-after-minutes. Purely informational: the script always
+  exits 0 and the step is meant to carry continue-on-error, so it can never
+  fail or skip a required check. Needs `actions: read` on the calling job's
+  GITHUB_TOKEN; without it the summary says the wait is unknown.
+
+  NOTE: doc strings here avoid literal expression syntax -- GitHub evaluates
+  expressions inside action metadata.
+
+inputs:
+  warn-after-minutes:
+    description: Queue wait, in minutes, above which a warning is emitted.
+    required: false
+    default: "20"
+  github-token:
+    description: Token used to read the run's jobs (needs actions read).
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    # One node file, no shell logic: the fleet's Windows backup has no bash.
+    - name: Summarize queue wait
+      shell: bash
+      if: runner.os != 'Windows'
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        WARN_AFTER_MINUTES: ${{ inputs.warn-after-minutes }}
+      run: node "${{ github.action_path }}/queue-wait.js"
+
+    - name: Summarize queue wait (Windows)
+      shell: powershell
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        WARN_AFTER_MINUTES: ${{ inputs.warn-after-minutes }}
+      run: |
+        node "${{ github.action_path }}/queue-wait.js"
+        exit 0

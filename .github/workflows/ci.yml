@@ -167,6 +167,11 @@ jobs:
     needs: [changes, workflow-lint, scripts, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read lets the queue-wait step list this run's jobs. A job-level
+    # grant replaces the workflow-level one, so contents stays explicit.
+    permissions:
+      contents: read
+      actions: read
     steps:
       # Local composite (`./actions/gate`): checkout required so action.yml
       # is on disk. Fleet callers use the remote pin and omit this step.
@@ -174,6 +179,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Informational only: runs before the gate so a failing gate cannot hide
+      # it, never fails (script exits 0, continue-on-error), and is not an
+      # input to the gate's results.
+      - name: Queue wait summary
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: ./actions/queue-wait
 
       - name: Determine allowed skips
         id: allowed-skips
