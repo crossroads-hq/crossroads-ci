@@ -4,7 +4,61 @@ runs:
   using: composite
   steps:
     - name: Verify launch before dependents
-      shell: bash
+      # Resolve only this trusted host interpreter; never runner/caller PATH.
+      # Unsafe loader state selects an invalid template: fail before exec, never skip.
+      shell: >-
+        ${{
+          runner.os == 'Linux' &&
+          toJSON(env.LD_PRELOAD) == 'null' &&
+          toJSON(env.LD_AUDIT) == 'null' &&
+          toJSON(env.LD_LIBRARY_PATH) == 'null' &&
+          toJSON(env.LD_DEBUG) == 'null' &&
+          toJSON(env.LD_DEBUG_OUTPUT) == 'null' &&
+          toJSON(env.LD_TRACE_LOADED_OBJECTS) == 'null' &&
+          toJSON(env.LD_TRACE_PRELINKING) == 'null' &&
+          toJSON(env.LD_PROFILE) == 'null' &&
+          toJSON(env.LD_PROFILE_OUTPUT) == 'null' &&
+          toJSON(env.LD_ORIGIN_PATH) == 'null' &&
+          toJSON(env.GLIBC_TUNABLES) == 'null' &&
+          toJSON(env.DYLD_INSERT_LIBRARIES) == 'null' &&
+          toJSON(env.DYLD_LIBRARY_PATH) == 'null' &&
+          toJSON(env.DYLD_FRAMEWORK_PATH) == 'null' &&
+          toJSON(env.DYLD_FALLBACK_LIBRARY_PATH) == 'null' &&
+          toJSON(env.DYLD_FALLBACK_FRAMEWORK_PATH) == 'null' &&
+          toJSON(env.DYLD_VERSIONED_LIBRARY_PATH) == 'null' &&
+          toJSON(env.DYLD_VERSIONED_FRAMEWORK_PATH) == 'null' &&
+          toJSON(env.DYLD_ROOT_PATH) == 'null' &&
+          toJSON(env.DYLD_IMAGE_SUFFIX) == 'null' &&
+          toJSON(env.DYLD_PRINT_ENV) == 'null' &&
+          toJSON(env.DYLD_PRINT_TO_FILE) == 'null' &&
+          toJSON(env.DYLD_JUST_BUILD_CLOSURE) == 'null' &&
+          toJSON(env.DYLD_SKIP_MAIN) == 'null' &&
+          toJSON(env.OPENSSL_CONF) == 'null' &&
+          toJSON(env.OPENSSL_CONF_INCLUDE) == 'null' &&
+          toJSON(env.OPENSSL_ENGINES) == 'null' &&
+          toJSON(env.OPENSSL_MODULES) == 'null' &&
+          '/usr/bin/node -- "{0}"' || '/usr/bin/node Admission-held'
+        }}
       env:
+        NODE_OPTIONS: ""
+        NODE_PATH: ""
+        BASH_ENV: ""
+        ENV: ""
+        NODE_ICU_DATA: ""
+        NODE_COMPILE_CACHE: ""
+        NODE_DEBUG: ""
+        NODE_DEBUG_NATIVE: ""
+        NODE_EXTRA_CA_CERTS: ""
+        SSLKEYLOGFILE: ""
+        NODE_TLS_REJECT_UNAUTHORIZED: "1"
+        NODE_USE_ENV_PROXY: "0"
         GH_TOKEN: ${{ github.token }}
-      run: node "$GITHUB_ACTION_PATH/../admission/verify.mjs" launch
+      run: |
+        const held = () => { console.error("Admission held"); process.exitCode = 1; };
+        (async () => {
+          const { join } = require("node:path");
+          const { pathToFileURL } = require("node:url");
+          const source = pathToFileURL(join(process.env.GITHUB_ACTION_PATH, "../admission/verify.mjs"));
+          const { runAction } = await import(source.href);
+          if ((await runAction("launch")).status !== "Verified") held();
+        })().catch(held);

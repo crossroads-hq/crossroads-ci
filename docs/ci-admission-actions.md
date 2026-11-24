@@ -5,7 +5,8 @@ Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 
 The original delivery evidence below belongs to the 2026-11-21 source. The
 [additional Story 3 propagation](#additional-story-3-propagation--2026-11-24)
-records the current stack. The first 2026-11-24 reconciliation and earlier
+records that propagation. The startup-hook security repair below records the
+current action boundary. The first 2026-11-24 reconciliation and earlier
 heads, review receipts, source-equality observations and test counts are historical.
 
 ## Inherited findings recorded before correction
@@ -85,7 +86,9 @@ actual jobs; this action never renumbers them or releases reservations.
 
 Both actions have no inputs, outputs or nested `uses:`. They invoke only the
 trusted shipped Node module via GITHUB_ACTION_PATH, with the workflow's
-`github.token` scoped to the verification step. Future callers must grant only
+`github.token` scoped to the verification step. The later startup repair below
+replaces the original Bash/PATH launch boundary with a fixed Linux interpreter
+and pre-execution loader rejection. Future callers must grant only
 Actions/Checks/Contents/Pull requests read and retain Metadata read, use trusted
 full-SHA remote actions, and execute no PR-controlled step/action/install hook
 before verification. Existing fleet Node (22+) is required; no setup installer
@@ -331,3 +334,77 @@ all-commit GitHub verification and fresh exact-head Codex/CI/security receipts
 belong in the PR conversation after they exist. Earlier receipts do not certify
 the new head. No successor is dispatched here. Native proofs, cross-date billing,
 owner setup, acceptance/adoption and activation gates remain unwaived.
+
+## Startup-hook security repair — 2026-11-25
+
+Security review of `e627853734c095ad2a35d95d47b6089107310ae4` reported
+[P2 startup-hook exposure](https://github.com/crossroads-hq/crossroads-ci/pull/132#discussion_r4687002573).
+A synthetic-only reproduction confirmed that inherited NODE_OPTIONS ran before
+both verifier entrypoints and observed the synthetic GH_TOKEN before Admission
+held. Empty enrollment does not waive this invoked-action defect. The coordinator
+authorized a narrow entrypoint repair while downstream source updates were held.
+Earlier clean security receipts are historical and do not resolve this finding.
+
+The owner directed the bounded repair on 2026-11-25: a fixed trusted interpreter,
+poisoned GITHUB_PATH coverage, loader refusal before launch and fresh independent
+security review. Bare `node` is insufficient: the runner's managed prepend list
+can be modified by an earlier caller step. Both declarations now choose only
+`/usr/bin/node -- "{0}"` on Linux. That absolute path bypasses caller PATH and
+runner GITHUB_PATH/PrependPath lookup. Trusted host integrity and an operator-owned
+Node 22+ at that fixed path are prerequisites; no installation is performed.
+Missing interpreter or unsupported host fails closed before verification.
+
+Caller loader controls are rejected by **presence**, including empty or `0`
+values, before any child process starts. Individual `toJSON(env.KEY) == 'null'`
+checks distinguish absent keys without serializing the token-bearing environment.
+The denied set covers Linux preload/audit/search/debug/trace/profile controls,
+GLIBC_TUNABLES, Darwin insertion/search/print/closure controls and OpenSSL config/
+engine/module controls. In particular LD_TRACE_LOADED_OBJECTS and DYLD_PRINT_ENV
+must not be set to empty as a purported fix. Unsafe presence selects the fixed
+invalid `/usr/bin/node Admission-held` template, with no script placeholder:
+the runner fails the step before process creation. It never skips verification
+or treats a bypassed process as success.
+
+NODE_OPTIONS/NODE_PATH and shell startup hooks are statically empty in the step
+environment before execution. No Bash is launched. Additional Node startup,
+debug/certificate/proxy controls are reset before the fixed interpreter starts.
+Literal JavaScript imports only the shipped verifier, calls the fixed phase,
+and maps held/error outcomes to fixed Admission held failure. The token remains
+step-scoped and is neither interpolated into source nor passed on a command line.
+Enrollment, canonical identities, permits, native decoder/read/verify modules,
+workflows, gate, model and capabilities are unchanged by this security repair.
+
+The boundary follows the runner's
+[ScriptHandler](https://github.com/actions/runner/blob/aea9aaa3a0b49933412c6f59d7f05be037207a28/src/Runner.Worker/Handlers/ScriptHandler.cs)
+and [WhichUtil](https://github.com/actions/runner/blob/aea9aaa3a0b49933412c6f59d7f05be037207a28/src/Runner.Sdk/Util/WhichUtil.cs):
+absolute interpreter resolution and required-placeholder validation precede
+ExecuteAsync. The known loader-key set is explicit; this is not a claim to
+recover an already compromised host or sanitize the runner process itself.
+Protected host/runtime setup and later native drill proofs remain required.
+
+Independent candidate security review found a missing legacy loader control:
+glibc 2.35 treats LD_TRACE_PRELINKING presence as trace mode before the program
+starts, including an empty value. Node 22+ does not establish a newer glibc.
+Record this defect before correction: both declarations and the four-value
+presence regression set must include LD_TRACE_PRELINKING; no host-version waiver.
+The correction now adds that guard to both declarations and the explicit
+four-value regressions. The
+[glibc 2.35 implementation](https://github.com/bminor/glibc/blob/release/2.35/master/elf/rtld.c#L2687)
+owns this compatibility evidence; the tests remain local runner-contract fixtures.
+
+`actions/admission/entrypoint.test.js` executes both literal declarations with
+synthetic credentials only. It covers Node preload, Bash hooks/functions, fake
+step PATH and poisoned runner prepend, plus a bare-interpreter positive attack
+control. Every denied loader key is tested with empty, `0`, `1` and a path;
+these cases reject before the fixture starts a process. Clean disabled refusal,
+fixed-phase verified/held/error wiring and a script path with spaces are covered.
+Linux tests use `/usr/bin/node`; macOS maps the fixed Linux executable to its
+test process's Node only within the explicit runner-contract fixture. This
+does not claim actual GitHub action execution or native admission acceptance.
+
+The manifest advances the two action declarations and adds this new security
+test source. Its other seven existing entries remain identical to `e6278537`.
+Earlier nine-source equality observations remain historical. Final validation,
+independent security/code review, signatures and fresh exact-head service/CI
+receipts are recorded on the PR after they exist. No readiness transition,
+branch/PR merge, permission/settings change, provisioning or activation occurs.
