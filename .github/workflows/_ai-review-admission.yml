@@ -127,7 +127,7 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Verify AI launch without waiting for heavy
-        uses: crossroads-hq/crossroads-ci/actions/admission-root@0a0ab8dbde95575b7a5e4fae51a738c04e1528cb # HQ-085 Story 6 draft #132
+        uses: crossroads-hq/crossroads-ci/actions/admission-root@e627853734c095ad2a35d95d47b6089107310ae4 # HQ-085 Story 6 draft #132
 
   review:
     name: AI review
@@ -183,7 +183,7 @@ jobs:
       # Every actual attempt verifies before ANY checkout, install or reviewer.
       # No cached root output, caller-selected identity or fail-open fallback.
       - name: Verify fresh AI job before checkout
-        uses: crossroads-hq/crossroads-ci/actions/admission-checkout@0a0ab8dbde95575b7a5e4fae51a738c04e1528cb # HQ-085 Story 6 draft #132
+        uses: crossroads-hq/crossroads-ci/actions/admission-checkout@e627853734c095ad2a35d95d47b6089107310ae4 # HQ-085 Story 6 draft #132
 
       # First, and pure arithmetic, so a misconfigured budget is refused before
       # anything is spent. `codex-wait-seconds` is bounded in check.js

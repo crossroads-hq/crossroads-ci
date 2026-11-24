@@ -4,8 +4,9 @@ Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298). Source-only, disabled.
 
 The original delivery evidence below belongs to the 2026-11-21 source. The
-[2026-11-24 reconciliation](#story-6-reconciliation--2026-11-24) records the
-current stack; earlier heads, review receipts and test counts remain historical.
+[additional Story 3 propagation](#additional-story-3-propagation--2026-11-24)
+records the current stack. The first 2026-11-24 reconciliation and earlier
+heads, review receipts, source-equality observations and test counts are historical.
 
 ## Inherited findings recorded before correction
 
@@ -254,6 +255,11 @@ acceptance uses existing CI #129/HQ #298.
 
 ## Story 6 reconciliation — 2026-11-24
 
+This first reconciliation was published at
+`0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`. Its source-equality observations
+describe that head; the additional propagation below supersedes the two shadow
+source hashes while preserving the other seven manifest entries.
+
 The owner authorized repairs and forward reconciliation in the existing chats,
 without provisioning or activation. Draft #132 still targets
 `codex/ci-admission-shadow`. Merge exact Story 3 head
@@ -264,14 +270,14 @@ main `6bb5ca4c0af6687cfed409d649b83aec3499da32`. Their fetched heads matched
 the live draft identities; every commit listed in drafts #130 and #131 was
 GitHub-verified before adoption.
 
-Story 3 now owns the four controller corrections and their exact regressions.
-Its controller module and test file are byte-for-byte identical to the copies
-already delivered in Story 6. The forward merge needs no conflict resolution,
-no duplicate patch and no native behavior change. Story 6's action modules,
-canonical contracts, native fixtures and both action declarations are unchanged.
-All nine entries in `ci-admission-actions-source.sha256` still match; the manifest
-therefore remains valid for those files without changing any original hash or
-claiming that it covers unrelated main files or documentation.
+At this first reconciliation, Story 3 owned the four controller corrections and
+their exact regressions. Its controller module and test file were byte-for-byte
+identical to the copies already delivered in Story 6. The forward merge needed
+no conflict resolution or duplicate patch. Story 6's action modules, canonical
+contracts, native fixtures and both action declarations were unchanged. All nine
+manifest entries matched at `0a0ab8d`; that historical observation covered those
+files, not unrelated main files or documentation. The current manifest records
+the later inherited shadow changes described below.
 
 The merge retains main's queue-wait action, its default-on gate summary, its
 tests and the action-pin advances exactly as present in Story 3. They are
@@ -289,3 +295,39 @@ head and exact-head Codex request/results are recorded on draft #132 after they
 exist. Original 279-test and review receipts above do not certify the new head.
 The coordinator owns propagation to the existing Story 7/8 and consumer chats;
 this reconciliation creates no successor chat and edits only Story 6's branch.
+
+## Additional Story 3 propagation — 2026-11-24
+
+The owner requested serial propagation through the existing PR stack and fresh
+exact-head CI, code and security review. PR #132 was originally opened as a
+draft and has since been marked ready by the human owner. Preserve its current
+`isDraft: false`; this source update makes no readiness, settings or activation
+change. The coordinating repair chat owns subsequent #133/#134 handoffs.
+
+Merge authoritative Story 3 head
+`7dae1ecae87f4bfcb57ddc8aab6743342a8c0957` forward into Story 6 head
+`0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`, retaining both histories and
+the target `codex/ci-admission-shadow`. The inherited change touches only the
+shadow controller, its tests and Story 3 documentation: candidate admission
+checks the candidate and every retained repository before adding a reservation;
+graph head/base refs use a Git-compatible literal branch validator while command
+and policy tags retain their strict validator. The five inherited regressions
+cover both split-group orders, the unused-repository control, valid literal refs
+and malformed refs. No native/action/policy/workflow code is changed here.
+
+The source manifest advances **two entries** to the inherited files:
+
+- Shadow module: `14384eb9a289057d23ab494429b2420bd770b592a4d5ca4c4e73ddb8ed7c2dec`.
+- Shadow tests: `44c442816e4198fb1ffc961ea15cac22a48390ff8fa4d7fa4b02d7e8ef03987b`.
+
+The other seven entries remain byte-identical to `0a0ab8d`: canonical contracts,
+native decoder/tests, read/verify modules and root/checkout declarations. The
+previous all-nine equality claim is historical, not a current assertion. Empty
+enrollment and dormant native protocol remain intact; the branch-ref change is
+confined to the shadow graph. Main's adopted queue-wait, gate and pins are retained.
+
+Current validation, independent actual-diff review, the new locally signed head,
+all-commit GitHub verification and fresh exact-head Codex/CI/security receipts
+belong in the PR conversation after they exist. Earlier receipts do not certify
+the new head. No successor is dispatched here. Native proofs, cross-date billing,
+owner setup, acceptance/adoption and activation gates remain unwaived.
