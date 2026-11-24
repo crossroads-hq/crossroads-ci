@@ -309,3 +309,96 @@ test('audit ignores unconsumed owner observations instead of persisting external
   assert.deepEqual(a.writer.ownerChecks, []);
   assert.ok(!JSON.stringify(a).includes('UNVALIDATED_EXTERNAL_TEXT'));
 });
+
+test('confirmed creation without its assigned ID refuses reopen and publication', async t => {
+  for (const lost of [null, undefined, 0, '500']) {
+    const r = await reserved(t); create(r);
+    const s = JSON.parse(r.db.prepare('SELECT body FROM shadow_state WHERE id = 1').get().body);
+    s.writer.writes[0].checkId = lost;
+    r.db.prepare('UPDATE shadow_state SET body = ? WHERE id = 1').run(JSON.stringify(s));
+    const { ShadowController } = await load();
+    assert.throws(() => new ShadowController(sqlite(r.db)), /Unknown/);
+    assert.throws(() => r.send('writer-prepare', { generation: 1, phase: 'launch', frame: r.f }), /Unknown/);
+    assert.equal(r.db.prepare("SELECT COUNT(*) AS n FROM shadow_audit WHERE kind = 'writer-prepare'").get().n, 1);
+  }
+});
+
+test('stop audits changed obligations even when every publication journal row is unchanged', async t => {
+  const r = await reserved(t); create(r); publish(r);
+  const before = r.c.snapshot(T); r.send('writer-stop');
+  const a = JSON.parse(r.db.prepare("SELECT body FROM shadow_audit WHERE kind = 'writer-stop'").get().body);
+  assert.deepEqual(a.writer.writes, []);
+  assert.equal(a.writer.appId, 900);
+  for (const targets of [a.targets, a.writer.targets]) {
+    assert.equal(targets.length, 1); const o = targets[0];
+    assert.equal(o.generation, 1); assert.equal(o.phase, 'Held');
+    assert.deepEqual(o.execution, before.reservations[0].execution);
+    assert.equal(o.ownerKey, before.reservations[0].ownerKey);
+    assert.deepEqual(o.launch, before.reservations[0].launch);
+    assert.equal(o.appId, 900);
+  }
+  assert.equal(r.c.snapshot(T).reservations.length, 1);
+});
+
+test('rejected malformed safety never copies raw bounds into append-only audit', async t => {
+  for (const mutate of [f => { f.safety.rate.headroom = { unvalidated: 'EXTERNAL_BODY' }; },
+    f => { f.safety.activation.expiresAt = { unvalidated: 'EXTERNAL_BODY' }; },
+    f => { f.safety.accounting.hostedMinutesDay = { unvalidated: 'EXTERNAL_BODY' }; },
+    f => { f.safety.rate.writesHour = 'EXTERNAL_BODY'; },
+    f => { f.safety.accounting.hostedMinutesTotal = ['EXTERNAL_BODY']; }]) {
+    const r = await rig(t), i = input(); queue(r, i); const f = writerFrame(i); mutate(f);
+    assert.equal(r.send('writer-reserve', { frame: f }).status, 'Unknown');
+    const a = JSON.parse(r.db.prepare("SELECT body FROM shadow_audit WHERE kind = 'writer-reserve'").get().body);
+    assert.equal(a.writer.bounds, null);
+    assert.ok(!JSON.stringify(a).includes('EXTERNAL_BODY'));
+    assert.equal(r.c.snapshot(T).reservations.length, 0);
+  }
+});
+
+test('known held safety retains validated numeric audit bounds', async t => {
+  const r = await rig(t), i = input(); queue(r, i); const f = writerFrame(i);
+  f.safety.paused = true;
+  assert.equal(r.send('writer-reserve', { frame: f }).status, 'Held');
+  const a = JSON.parse(r.db.prepare("SELECT body FROM shadow_audit WHERE kind = 'writer-reserve'").get().body);
+  assert.equal(a.writer.bounds.headroom, 1);
+  assert.equal(a.writer.bounds.activationExpiresAt, f.safety.activation.expiresAt);
+  assert.equal(a.writer.bounds.hostedMinutesTotal, 0);
+});
+
+test('never-dispatched stopped recovery drains only after complete terminal evidence and retains charges', async t => {
+  const r = await rig(t), i = input(); queue(r, i);
+  const proof = ownerCheck(i, T); r.send('owner', proof);
+  const x = execution(i, 100, 2, 2000), f = writerFrame(i);
+  f.ownerChecks = [proof]; f.terminal = [terminal(x)];
+  r.send('writer-reserve', { frame: f }); const before = r.c.snapshot(T);
+  assert.equal(before.requests[0].reentries, 1);
+  r.send('writer-stop'); const stopped = r.c.snapshot(T);
+  assert.equal(stopped.writer.writes[0].state, 'fenced');
+  assert.equal(stopped.writer.writes[0].fencedAt, null);
+  assert.equal(stopped.reservations[0].mutation, 'none');
+  assert.equal(stopped.reservations.length, 1);
+  const other = job(x, 7777, 'other', null, 'in_progress', 'AI');
+  assert.throws(() => r.send('settle', { generation: 1, evidence: terminal(x, T, [other]),
+    checkpoint: 'before_checkout', outcome: 'held' }), /Unknown/);
+  assert.throws(() => r.send('settle', { generation: 1, evidence: { ...terminal(x), coveredAttempts: [2] },
+    checkpoint: 'before_checkout', outcome: 'held' }), /Unknown/);
+  const { ShadowController } = await load(); new ShadowController(sqlite(r.db));
+  r.send('settle', { generation: 1, evidence: terminal(x), checkpoint: 'before_checkout', outcome: 'held' });
+  const after = r.c.snapshot(T);
+  assert.equal(after.reservations.length, 0); assert.equal(after.history[0].released, true);
+  assert.deepEqual(after.writer.writes, stopped.writer.writes);
+  assert.deepEqual(after.daily, before.daily); assert.deepEqual(after.requests, before.requests);
+  assert.equal(after.inputs[0].readyAt, before.inputs[0].readyAt);
+  assert.equal(after.inputs[0].intentCreatedAt, before.inputs[0].intentCreatedAt);
+  assert.deepEqual(after.effects, []);
+});
+
+test('stop cannot classify an already-fenced uncertain rerun as never dispatched', async t => {
+  const r = await reserved(t, 'recovery'); r.send('writer-fence', { writeId: 1, frame: r.f });
+  r.send('writer-stop'); const s = r.c.snapshot(T);
+  assert.equal(s.writer.writes[0].state, 'unresolved');
+  assert.equal(s.reservations[0].mutation, 'unresolved');
+  assert.throws(() => r.send('settle', { generation: 1, evidence: terminal(r.x),
+    checkpoint: 'before_checkout', outcome: 'held' }), /Unknown/);
+  assert.equal(r.c.snapshot(T).reservations.length, 1);
+});

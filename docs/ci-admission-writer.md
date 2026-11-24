@@ -203,3 +203,29 @@ reviewer reproduced an initial frame persisting unvalidated extra owner-check
 text into audit. Project only observations canonically validated for the exact
 durable owner keys targeted by that writer event. Unrelated/unconsumed owner
 entries are not audit authority or stored text. Add the direct regression.
+
+## 2026-11-24 service review repair (recorded before correction)
+
+Current published draft #134 head `ce38e923872316a8e1c7b4953be0cfee79f4c1e3`
+has four P2s in service review `6003647494`, verified against current source:
+
+- `discussion_r4651211323`: a confirmed create with a lost/null assigned ID
+  reopens and substitutes the trial sentinel into a durable publication target.
+  Require a positive confirmed assigned ID and refuse publication without it.
+- `discussion_r4651211332`: stop changes a published obligation from Reserved
+  to Held without a changed journal row, leaving audit targets/App empty.
+  Include every changed managed obligation and its execution/owner/permits.
+- `discussion_r4651211338`: malformed rejected safety data is projected raw
+  into audit bounds. Retain only validated bounded scalars; unknown safety
+  evidence contributes null bounds, never external objects/text.
+- Review body: stop before a recovery rerun's dispatch fences the journal but
+  leaves mutation intent, preventing authoritative terminal drain forever.
+  Record that no mutation was dispatched, retain journal/counters/reentry charges,
+  and still require complete whole-run/all-attempt terminal settlement. A fenced
+  uncertain write must remain unresolved; stop and time never release capacity.
+
+Prepare a signed local repair commit without pushing while the coordinator
+reconciles upstream Stories 2/3/6/7. After the final Story 7 head arrives, merge
+it forward, run full checks/re-review, and publish one combined validated batch.
+No successor dispatch is authorized by this repair. All three existing activation
+blockers, dormant source behavior and absent executor remain unchanged.

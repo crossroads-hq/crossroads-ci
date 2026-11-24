@@ -38,7 +38,8 @@ export function validateWriter(s) {
       inputKey(r.input) === o.key && executionKey(r.execution) === executionKey(expectedExecution) &&
       r.preparedAt >= o.reservedAt && r.preparedAt <= s.lastAt && r.epoch <= w.epoch &&
       (r.kind === 'rerun' ? r.phase === null && r.checkId === null : ['launch', 'checkout'].includes(r.phase)) &&
-      (r.kind !== 'publish' || id(r.checkId)) && stable(r.request) === stable(requestFor(o, r)));
+      (r.kind !== 'publish' || id(r.checkId)) &&
+      (r.kind !== 'create' || r.state !== 'confirmed' || id(r.checkId)) && stable(r.request) === stable(requestFor(o, r)));
     if (r.state === 'intent' || r.state === 'fenced') ensure(r.fencedAt === null && r.confirmedAt === null);
     else ensure(clock(r.fencedAt) && r.fencedAt >= r.preparedAt && r.fencedAt <= s.lastAt &&
       (r.state === 'unresolved' ? r.confirmedAt === null : clock(r.confirmedAt) &&
@@ -121,12 +122,13 @@ export function writerAudit(s, before, c) {
   const changed = w.writes.filter(r => stable(r) !== stable(prior.writes.find(p => p.id === r.id)));
   const generations = new Set(changed.map(r => r.generation));
   if (id(c.generation)) generations.add(c.generation);
-  if (c.type === 'writer-reserve') for (const o of s.obligations) if (o.writerManaged &&
-    !before.obligations.some(p => p.generation === o.generation)) generations.add(o.generation);
+  for (const o of s.obligations) if (o.writerManaged &&
+    stable(o) !== stable(before.obligations.find(p => p.generation === o.generation))) generations.add(o.generation);
   const targets = s.obligations.filter(o => generations.has(o.generation));
   const first = targets[0], f = c.frame;
   const source = e => e ? { observedAt: clock(e.observedAt) ? e.observedAt : null, complete: e.complete === true } : null;
   const rate = f?.safety?.rate;
+  const safetyValidated = newWorkDecision(f?.safety, c.now).status !== 'Unknown';
   const ownerKeys = new Set(targets.map(o => o.ownerKey).filter(Boolean));
   const owners = ownerKeys.size && f ? f.ownerChecks : [];
   ensure(Array.isArray(owners) && owners.length <= 512);
@@ -152,7 +154,7 @@ export function writerAudit(s, before, c) {
     sources: { inputs: source(f?.inputs), prs: source(f?.prs), capacity: source(f?.capacity),
       enrollments: source(f?.enrollments), gates: source(f?.gates), rate: source(rate),
       accounting: source(f?.safety?.accounting), checks: source(c.checks), jobs: source(c.jobs) },
-    bounds: rate ? { readsHourRemaining: Math.max(0, CANDIDATES.readsHour - rate.readsHour),
+    bounds: safetyValidated ? { readsHourRemaining: Math.max(0, CANDIDATES.readsHour - rate.readsHour),
       writesHourRemaining: Math.max(0, CANDIDATES.writesHour - rate.writesHour - w.writes.filter(r =>
         r.state === 'intent' || (r.fencedAt !== null && c.now - r.fencedAt < 3600000)).length),
       writesMinuteRemaining: Math.max(0, CANDIDATES.writesMinute - rate.writesMinute - w.writes.filter(r =>
@@ -198,10 +200,11 @@ export function writerTransition(s, c, h) {
       ensure(['none', 'confirmed'].includes(o.mutation) && ['launch', 'checkout'].includes(c.phase));
       const rows = w.writes.filter(r => r.generation === o.generation && r.phase === c.phase);
       const created = rows.find(r => r.kind === 'create');
-      ensure(!rows.some(r => r.kind === 'publish') && (!created || created.state === 'confirmed'));
+      ensure(!rows.some(r => r.kind === 'publish') &&
+        (!created || (created.state === 'confirmed' && id(created.checkId))));
       // Reuse the canonical permit transition on a disposable state to validate
       // capacity/owner/phase/expiry and construct the ONE canonical wire value.
-      const checkId = created?.checkId ?? Number.MAX_SAFE_INTEGER;
+      const checkId = created ? created.checkId : Number.MAX_SAFE_INTEGER;
       const trial = copy(s);
       h.permit(trial, { ...c, appId: o.appId, checkId }, now);
       if (!created) {
@@ -218,7 +221,7 @@ export function writerTransition(s, c, h) {
       else {
         ensure(executionKey(r.execution) === executionKey(o.execution));
         const trial = copy(s); h.permit(trial, { generation: o.generation, phase: r.phase, appId: o.appId,
-          checkId: r.checkId ?? Number.MAX_SAFE_INTEGER, frame: c.frame }, now);
+          checkId: r.kind === 'create' ? Number.MAX_SAFE_INTEGER : r.checkId, frame: c.frame }, now);
       }
       // A later executor MUST commit this before network, at most once. No
       // descriptor/effect is returned, even on idempotent command receipt replay.
@@ -263,7 +266,16 @@ export function writerTransition(s, c, h) {
     }
     case 'writer-stop':
       w.stopped = true; w.epoch++;
-      for (const r of w.writes) if (r.state === 'intent') r.state = 'fenced';
+      for (const r of w.writes) if (r.state === 'intent') {
+        if (r.kind === 'rerun') {
+          const o = obligation(r.generation);
+          ensure(o.mutation === 'intent' && executionKey(o.execution) === executionKey(o.origin));
+          // No dispatch fence was committed: this is known no-mutation, not a
+          // lost outcome. Retain the journal/charges and require terminal drain.
+          o.mutation = 'none';
+        }
+        r.state = 'fenced';
+      }
       for (const o of h.active(s)) if (o.writerManaged && o.phase !== 'Active') o.phase = 'Held';
       return h.answer('Recorded', 'Writer stopped; obligations and short rights retained');
     default: throw new Error('Unknown writer command');
