@@ -3,6 +3,10 @@
 Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298). Source-only, disabled.
 
+The original delivery evidence below belongs to the 2026-11-21 source. The
+[2026-11-24 reconciliation](#story-6-reconciliation--2026-11-24) records the
+current stack; earlier heads, review receipts and test counts remain historical.
+
 ## Inherited findings recorded before correction
 
 At Story 3 `94ffb9fcd90b7dd6a03e48815223aa80f13755b2`, service review
@@ -247,3 +251,41 @@ physical/unmanaged occupancy, cross-date allocation, separately bounded native
 drills, owner acceptance/merge/adoption/deploy and explicit activation remain
 gates. Review date: 2026-11-21. No new standalone issue (prior write rejected);
 acceptance uses existing CI #129/HQ #298.
+
+## Story 6 reconciliation — 2026-11-24
+
+The owner authorized repairs and forward reconciliation in the existing chats,
+without provisioning or activation. Draft #132 still targets
+`codex/ci-admission-shadow`. Merge exact Story 3 head
+`10b9bb7446f77532c5e0e9759114c63b46b1c0b3` forward into Story 6's original
+`31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`, preserving both histories. Story 3
+now includes Story 2 `07183845f62d7f39dbe6bf28288215d827314c26`, which includes
+main `6bb5ca4c0af6687cfed409d649b83aec3499da32`. Their fetched heads matched
+the live draft identities; every commit listed in drafts #130 and #131 was
+GitHub-verified before adoption.
+
+Story 3 now owns the four controller corrections and their exact regressions.
+Its controller module and test file are byte-for-byte identical to the copies
+already delivered in Story 6. The forward merge needs no conflict resolution,
+no duplicate patch and no native behavior change. Story 6's action modules,
+canonical contracts, native fixtures and both action declarations are unchanged.
+All nine entries in `ci-admission-actions-source.sha256` still match; the manifest
+therefore remains valid for those files without changing any original hash or
+claiming that it covers unrelated main files or documentation.
+
+The merge retains main's queue-wait action, its default-on gate summary, its
+tests and the action-pin advances exactly as present in Story 3. They are
+inherited main changes, not a new Story 6 feature or new pin selection. The
+required gate, original needs/results and authorized skips are preserved.
+Main's documented read-only Actions grant for the informational queue summary
+is retained exactly; this reconciliation adds no permissions beyond those
+adopted definitions.
+Empty admission enrollment, fixed Admission held failure, trusted no-checkout
+root and fresh before-checkout verification remain unchanged. No dormant guard
+is enabled and no native proof or activation blocker is waived.
+
+Current local verification, independent actual-merge-diff review, the new signed
+head and exact-head Codex request/results are recorded on draft #132 after they
+exist. Original 279-test and review receipts above do not certify the new head.
+The coordinator owns propagation to the existing Story 7/8 and consumer chats;
+this reconciliation creates no successor chat and edits only Story 6's branch.
