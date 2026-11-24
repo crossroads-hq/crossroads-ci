@@ -204,3 +204,18 @@ Requested action: accept or return missing evidence; carry serial owner authoriz
 Acceptance criteria: Story 4's own bounded issue, source-only fixed reader/protected Status evidence, local checks, independent review, signed verified draft, explicit Codex request and clean handoff.
 Open questions: cross-date allocation, topology/load/native proofs and manual owner protection/App/infra/activation gates remain deferred; missing live infra does not block safe source work.
 Review date: 2026-11-21; refresh mutable draft/review status before successor edits.
+
+## Additional review repair — 2026-11-24
+
+The two later comments on PR #131 require prospective reservations to fit the
+candidate repository **and every retained repository**, matching publication's
+feasibility rule. Split one-slot/two-slot repository groups now retain only work
+that can launch; a repository with no retained work adds no extra constraint.
+Graph refs use literal Git branch-name rules rather than the 64-character command
+tag rules: valid `+`, longer and Unicode names are accepted, malformed refs remain
+Unknown, and exact ancestor matching is unchanged. Command/policy tags stay strict.
+Five added SQLite regressions bring the focused suite to 38 tests; representative
+valid/invalid refs are also checked against `git check-ref-format --branch`.
+These corrections supersede earlier module/test source-equality observations;
+exact signed publication and review receipts belong in the PR conversation.
+The source remains disabled; no workflow, enrollment or activation change.
