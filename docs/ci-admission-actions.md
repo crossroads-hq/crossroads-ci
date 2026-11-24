@@ -398,9 +398,11 @@ step PATH and poisoned runner prepend, plus a bare-interpreter positive attack
 control. Every denied loader key is tested with empty, `0`, `1` and a path;
 these cases reject before the fixture starts a process. Clean disabled refusal,
 fixed-phase verified/held/error wiring and a script path with spaces are covered.
-Linux tests use `/usr/bin/node`; macOS maps the fixed Linux executable to its
-test process's Node only within the explicit runner-contract fixture. This
-does not claim actual GitHub action execution or native admission acceptance.
+The explicit runner-contract fixture maps the fixed Linux executable to the
+test process's absolute Node on every test host. Missing-interpreter cases
+reject before startup without searching attacker prepend entries. These tests
+do not establish the host's `/usr/bin/node` prerequisite, actual GitHub action
+execution or native admission acceptance.
 
 The manifest advances the two action declarations and adds this new security
 test source. Its other seven existing entries remain identical to `e6278537`.
@@ -408,3 +410,24 @@ Earlier nine-source equality observations remain historical. Final validation,
 independent security/code review, signatures and fresh exact-head service/CI
 receipts are recorded on the PR after they exist. No readiness transition,
 branch/PR merge, permission/settings change, provisioning or activation occurs.
+
+## Linux fixture correction — 2026-11-25
+
+The first security repair head `1246ff6500bd0f36936f8284fd5bbe643dc7ef91`
+failed Scripts and profiles in run 45499932053/job 138820292848. Twelve fixed-
+interpreter child cases returned null status while prelaunch refusal and bare-
+interpreter attack controls passed. The fixture discarded spawn error/signal;
+the log therefore does not establish the exact Linux errno. A local missing
+`/usr/bin/node` reproduction returned the same null status with ENOENT. The
+fixture incorrectly assumed every Linux test host supplied the production path,
+while already virtualizing that prerequisite on macOS.
+
+The correction changes only the test harness and its evidence: it models the
+fixed trusted path with the test process's absolute Node on every host, preserves
+all literal path/loader/poisoning assertions, and adds both-entrypoint refusal
+when that trusted interpreter is unavailable even with an attacker prepend
+present. Unexpected spawn errors/signals now become explicit failures. Production's fixed
+path remains a real deployment prerequisite, with no PATH fallback, install,
+guard weakening, test skip or CI rerun. Fresh validation/review receipts must
+certify the subsequent head; earlier local passes did not prove this CI host
+met the fixed runtime prerequisite.

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join, resolve, dirname, delimiter } = require('node:path');
+const { join, resolve, dirname, delimiter, isAbsolute } = require('node:path');
 
 const TOKEN = 'synthetic-admission-test-token';
 const actions = [['admission-root', 'launch'], ['admission-checkout', 'checkout']];
@@ -37,9 +37,12 @@ function shellFor(step, env, os) {
 }
 // Execute literal declarations with Runner's resolution/format ordering. A
 // fixed existing absolute executable bypasses managed prepend and PATH search.
-// macOS maps the Linux-only fixed Node to this test process's Node; Linux uses
-// /usr/bin/node itself. Neither is a native GitHub action-execution proof.
-function execute(step, dir, actionPath, caller = {}, { prependPath = [], os = 'Linux' } = {}) {
+// All test hosts map the Linux-only fixed Node to this process's absolute Node
+// executable. This models an owner-supplied trusted interpreter; it does not
+// assert that the test host satisfies the production /usr/bin/node prerequisite.
+function execute(step, dir, actionPath, caller = {}, {
+  prependPath = [], os = 'Linux', trustedInterpreter = process.execPath,
+} = {}) {
   const env = { PATH: process.env.PATH, GITHUB_ACTION_PATH: actionPath, ...caller };
   for (const [key, value] of Object.entries(step.env || {})) {
     assert.equal(typeof value, 'string');
@@ -49,7 +52,12 @@ function execute(step, dir, actionPath, caller = {}, { prependPath = [], os = 'L
   const format = shell.slice(command.length).trim();
   if (format && !format.includes('{0}')) return { status: 1, stdout: '', stderr: 'Invalid shell option: Admission-held', started: false };
   let executable;
-  if (command === '/usr/bin/node') executable = process.platform === 'linux' ? command : process.execPath;
+  if (command === '/usr/bin/node') {
+    assert.ok(isAbsolute(trustedInterpreter), 'Trusted fixture interpreter must be absolute');
+    if (!existsSync(trustedInterpreter)) return { status: 1, stdout: '', stderr: 'Admission held: missing trusted interpreter',
+      started: false, resolutionError: 'ENOENT' };
+    executable = trustedInterpreter;
+  }
   else if (command === 'bash') executable = '/bin/bash';
   else if (command === 'node') executable = [...prependPath, dirname(process.execPath), ...process.env.PATH.split(delimiter)]
     .map(path => join(path, 'node')).find(existsSync);
@@ -58,7 +66,10 @@ function execute(step, dir, actionPath, caller = {}, { prependPath = [], os = 'L
   const file = join(dir, 'step with spaces'); writeFileSync(file, step.run);
   const parameters = format === '-- "{0}"' ? ['--', file] :
     ['--noprofile', '--norc', '-e', '-o', 'pipefail', file];
-  return { ...spawnSync(executable, parameters, { encoding: 'utf8', cwd: dir, env }), started: true };
+  const result = spawnSync(executable, parameters, { encoding: 'utf8', cwd: dir, env });
+  assert.ifError(result.error);
+  assert.equal(result.signal, null, `Interpreter terminated by signal ${result.signal}`);
+  return { ...result, started: true };
 }
 function held(result) {
   assert.equal(result.status, 1, result.stderr);
@@ -93,6 +104,16 @@ for (const [name, phase] of actions) {
     held(execute(step, dir, resolve(__dirname, '..', name), {}, { prependPath: [bin] }));
     assert.match(step.shell, /'\/usr\/bin\/node -- "\{0\}"'/);
     assert.equal(step.if, undefined, 'Unsafe startup must fail, never skip verification');
+  });
+  test(`${name} refuses a missing trusted interpreter without PATH fallback`, t => {
+    const dir = scratch(t), step = declaration(name), bin = join(dir, 'attacker fallback'); mkdirSync(bin);
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\nprintf "fallback-hook:%s\\n" "$GH_TOKEN"\n', { mode: 0o755 });
+    const result = execute(step, dir, resolve(__dirname, '..', name), {}, {
+      prependPath: [bin], trustedInterpreter: join(dir, 'missing fixed node'),
+    });
+    assert.equal(result.started, false); assert.equal(result.status, 1);
+    assert.equal(result.resolutionError, 'ENOENT'); assert.equal(result.stdout, '');
+    assert.equal(result.stderr.includes(TOKEN), false);
   });
   test(`${name} prepend fixture exposes a bare-interpreter regression`, t => {
     const dir = scratch(t), step = declaration(name), bin = join(dir, 'attacker prepend'); mkdirSync(bin);
