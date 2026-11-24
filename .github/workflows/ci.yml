@@ -186,6 +186,8 @@ jobs:
       - name: Queue wait summary
         if: ${{ !cancelled() }}
         continue-on-error: true
+        # continue-on-error cannot stop a hang, so bound the step itself.
+        timeout-minutes: 2
         uses: ./actions/queue-wait
 
       - name: Determine allowed skips

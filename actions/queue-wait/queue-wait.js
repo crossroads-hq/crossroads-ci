@@ -7,6 +7,7 @@ const fs = require("node:fs");
 
 const MAX_PAGES = 10;
 const DEFAULT_WARN_MINUTES = 20;
+const REQUEST_TIMEOUT_MS = 15000;
 
 function parseThreshold(raw) {
   const text = String(raw ?? "").trim();
@@ -29,9 +30,11 @@ function fmt(minutes) {
 // A job that never got a runner reports started_at == created_at, which would
 // print as a 0 wait. Say so instead.
 function notStarted(job) {
+  // No runner ever picked it up, whatever the conclusion (startup failure,
+  // timed_out, cancelled, skipped): created_at == started_at there is not a wait.
+  if (!job.runner_id && !job.runner_name) return true;
   if (["queued", "waiting", "pending", "requested"].includes(job.status)) return true;
-  if (job.conclusion === "skipped") return true;
-  return job.conclusion === "cancelled" && !job.runner_id && !job.runner_name;
+  return job.conclusion === "skipped";
 }
 
 function analyzeJob(job, now) {
@@ -59,6 +62,7 @@ function annotationEscape(text) {
 function render(rows, threshold, note) {
   const lines = ["### Runner queue wait", ""];
   if (note) lines.push(`> ${note}`, "");
+  if (!rows.length && !note) lines.push("> No jobs returned for this run.", "");
   if (rows.length) {
     lines.push("| Job | Runner | State | Queued | Run time |", "| --- | --- | --- | ---: | ---: |");
     for (const r of rows) {
@@ -77,21 +81,46 @@ function warnings(rows, threshold) {
     .map((r) => `::warning title=Long runner queue wait::${annotationEscape(`${r.name} waited ${r.wait.toFixed(1)} min for a runner (threshold ${threshold} min)${r.runner === "-" ? "" : `; runner ${r.runner}`}.`)}`);
 }
 
+// Bounds one request (headers and body). The abort signal stops a real fetch;
+// the race also covers a fetch that ignores it. A hang must never outlive the
+// step: the gate job is a required check with its own timeout.
+async function withTimeout(ms, work) {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`timed out after ${ms} ms`));
+    }, ms);
+  });
+  try {
+    return await Promise.race([work(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Returns { jobs } or { error }. A response that is malformed, or a list that
 // cannot be shown complete, is an error: unknown, not "no jobs".
-async function fetchJobs({ fetchImpl, apiUrl, repo, runId, token }) {
+async function fetchJobs({ fetchImpl, apiUrl, repo, runId, token, timeoutMs = REQUEST_TIMEOUT_MS }) {
   const jobs = [];
   let total = null;
   for (let page = 1; page <= MAX_PAGES; page++) {
     let response;
+    let body;
     try {
-      response = await fetchImpl(`${apiUrl}/repos/${repo}/actions/runs/${runId}/jobs?per_page=100&page=${page}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      });
+      ({ response, body } = await withTimeout(timeoutMs, async (signal) => {
+        const res = await fetchImpl(`${apiUrl}/repos/${repo}/actions/runs/${runId}/jobs?per_page=100&page=${page}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          signal,
+        });
+        // Body read stays inside the timeout; a non-OK body is never parsed.
+        return { response: res, body: res.ok ? await res.json().catch(() => undefined) : undefined };
+      }));
     } catch (error) {
       return { error: `request failed (${error.message})` };
     }
@@ -99,12 +128,7 @@ async function fetchJobs({ fetchImpl, apiUrl, repo, runId, token }) {
       const hint = response.status === 403 || response.status === 404 ? "; the job token may lack actions: read" : "";
       return { error: `HTTP ${response.status}${hint}` };
     }
-    let body;
-    try {
-      body = await response.json();
-    } catch {
-      return { error: "response was not valid JSON" };
-    }
+    if (body === undefined) return { error: "response was not valid JSON" };
     if (!body || !Array.isArray(body.jobs) || !Number.isInteger(body.total_count)) {
       return { error: "response was malformed" };
     }

@@ -96,3 +96,34 @@ test("the script exits 0 even when the API is unreachable", () => {
   });
   assert.match(result, /Queue wait unknown/);
 });
+
+test("a startup failure or timeout with no runner is 'not started', not a 0 wait", () => {
+  for (const conclusion of ["failure", "timed_out", "cancelled", "startup_failure"]) {
+    const r = analyzeJob(job({ conclusion, runner_id: 0, runner_name: "", started_at: "2026-11-23T10:00:00Z", completed_at: "2026-11-23T10:00:00Z" }), NOW);
+    assert.equal(r.state, "not started", conclusion);
+    assert.equal(r.wait, null);
+  }
+});
+
+test("a hung request becomes unknown within the timeout, even if fetch ignores the signal", async () => {
+  const hung = () => new Promise(() => {});
+  const r = await fetchJobs({ fetchImpl: hung, apiUrl: "https://x", repo: "o/r", runId: "1", token: "t", timeoutMs: 20 });
+  assert.match(r.error, /timed out after 20 ms/);
+});
+
+test("an aborted request is reported as unknown", async () => {
+  const aborting = (_url, { signal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+  const r = await fetchJobs({ fetchImpl: aborting, apiUrl: "https://x", repo: "o/r", runId: "1", token: "t", timeoutMs: 20 });
+  assert.match(r.error, /request failed/);
+});
+
+test("a hung body read is bounded too", async () => {
+  const r = await fetchJobs({ fetchImpl: async () => ({ ok: true, status: 200, json: () => new Promise(() => {}) }), apiUrl: "https://x", repo: "o/r", runId: "1", token: "t", timeoutMs: 20 });
+  assert.match(r.error, /timed out/);
+});
+
+test("an empty valid job list says no jobs were returned", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const r = await main(env(), async () => ok({ total_count: 0, jobs: [] }), NOW);
+  assert.match(r.summary, /No jobs returned/);
+});
