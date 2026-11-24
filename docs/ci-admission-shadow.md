@@ -1,8 +1,10 @@
 # HQ-085 Story 3 — disabled durable shadow controller
 
-Stack: CI draft [#130](https://github.com/crossroads-hq/crossroads-ci/pull/130)
-at `ca28d41a3dc7741c4086f3d047198281b2fb1919`. This story branches from and
-targets `codex/ci-admission-contracts`; it does not change that predecessor.
+Stack: CI draft [#130](https://github.com/crossroads-hq/crossroads-ci/pull/130),
+originally at `ca28d41a3dc7741c4086f3d047198281b2fb1919`. The 2026-11-24 repair
+forward-merges its published head `07183845f62d7f39dbe6bf28288215d827314c26`,
+including main `6bb5ca4c0af6687cfed409d649b83aec3499da32`. This story targets
+`codex/ci-admission-contracts`; it does not change that predecessor.
 Authority is HQ draft [#299](https://github.com/crossroads-hq/hq/pull/299) at
 `5244cd89b183f069186eb45290019e8059aeb1fb`, especially the complete
 [HQ-085 specification](https://github.com/crossroads-hq/hq/blob/5244cd89b183f069186eb45290019e8059aeb1fb/docs/plans/HQ-085-specification.md),
@@ -154,7 +156,37 @@ run them, leave unrelated preflight repair to its own follow-up. Per-repo object
 in-memory authority and a production polling/writer in this slice were rejected:
 they respectively split capacity, lose obligations, or cross the story boundary.
 
-## Handoff
+## Story 3 repair — 2026-11-24
+
+Tracking: [CI #135](https://github.com/crossroads-hq/crossroads-ci/issues/135),
+with the four current-head Codex findings on draft #131:
+[observed heavy identity](https://github.com/crossroads-hq/crossroads-ci/pull/131#discussion_r4650559888),
+[positive ledger job identity](https://github.com/crossroads-hq/crossroads-ci/pull/131#discussion_r4650559889),
+[owner request run scope](https://github.com/crossroads-hq/crossroads-ci/pull/131#discussion_r4650559894),
+and [retained capacity feasibility](https://github.com/crossroads-hq/crossroads-ci/pull/131#discussion_r4650559896).
+The original head `94ffb9fcd90b7dd6a03e48815223aa80f13755b2` fails all four
+existing regressions while its other 29 focused tests pass. These are contract
+defects (rank 3 review evidence, rank 4 reproducing tests), not new policy.
+
+The repair reuses only the controller/test corrections already delivered in
+Story 6 draft #132 at `31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`:
+complete binding retains the observed heavy ID exactly; ledger records require
+a positive numeric actual-job ID; inherited owner authority stays in its
+originating native run; every new permit rechecks all retained reservations
+against fresh capacity. Zero room means fully reserved but feasible; negative
+room means overcommitted and refuses publication. Obligations and existing
+short rights remain retained. No Story 6 action feature is included here.
+
+The corrective module and focused tests must match that exact Story 6 source.
+Fresh-main reconciliation enters through an updated Story 2 target by a signed
+forward merge, preserving its queue-wait and action-pin changes. The coordinator
+owns subsequent propagation through drafts #132, #133 and #134; this chat changes
+only draft #131. Publication and final exact-head validation/review receipts are
+recorded on the draft. Earlier review receipts remain historical evidence and
+do not certify the repaired head. No new story, activation, deployment, external
+writer or native drill is authorized by this repair.
+
+## Original delivery handoff
 
 From: CI Engineering / Portfolio, in-context author.
 To: HQ-022 Story 4 owner and independent verifier.
