@@ -3,7 +3,7 @@
 // Keep the legacy entry byte-for-byte unchanged; its reviewer remains the owner.
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
-const PIN = '31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2';
+const PIN = '0a0ab8dbde95575b7a5e4fae51a738c04e1528cb';
 function replaceOnce(source, from, to) {
   if (!source.includes(from) || source.indexOf(from) !== source.lastIndexOf(from)) {
     throw new Error('AI reviewer owner workflow changed; review generator anchors');

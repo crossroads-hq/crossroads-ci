@@ -3,8 +3,11 @@
 Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298). Source-only, default OFF.
 
-Stack FROM/TARGET Story 6 `codex/ci-admission-actions` at
-`31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`, [draft #132](https://github.com/crossroads-hq/crossroads-ci/pull/132).
+Current target and admission action source: Story 6 `codex/ci-admission-actions`
+at `0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`,
+[draft #132](https://github.com/crossroads-hq/crossroads-ci/pull/132), after the
+2026-11-24 forward reconciliation below. The original target was
+`31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`; earlier evidence remains historical.
 Its GitHub commit verification is `verified:true`, `reason:valid`; both remote
 action pins use that exact source, with its existing source hash manifest checked
 locally. Story 1 authority remains HQ draft #299 at
@@ -212,3 +215,73 @@ The latter does not claim online audit coverage. The new filter regression
 passed after its recorded red result; generation/syntax/hash/diff checks stay
 clean. No required gate logic or existing reviewer is changed. The final
 separate-agent correction verdict and GitHub receipts follow on this draft.
+
+## Story 7 reconciliation — 2026-11-24
+
+The owner authorized repairs and forward reconciliation in the existing chats,
+with no provisioning or activation. Draft #133 continues to target
+`codex/ci-admission-actions`. Adopt exact signed/verified Story 6 head
+`0a0ab8dbde95575b7a5e4fae51a738c04e1528cb` forward from Story 7's published
+`31c1e265fc0741ddb1de4a550e0a94337d6b1973`, preserving both histories.
+The original Story 6 source `31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2` and
+all original test/review receipts above remain historical evidence. They do
+not certify this reconciled head.
+
+The fetched Story 6 commit has parents original Story 6 and repaired Story 3
+`10b9bb7446f77532c5e0e9759114c63b46b1c0b3`; it contains current main
+`6bb5ca4c0af6687cfed409d649b83aec3499da32` through repaired Story 2/3.
+Its nine action/runtime/test source hashes are byte-for-byte unchanged and the
+original `ci-admission-actions-source.sha256` is retained without relabelling
+it as a manifest of unrelated main files. The two admission action pins in the
+editorial generator and their regression expectations advance to this exact
+Story 6 merge SHA, with the draft #132 provenance comments retained. Regenerate
+the admitted workflow from the inherited canonical reviewer, including its
+current Claude action pin; never restore an old whole workflow.
+
+Preserve main's default-on queue-wait/gate summary and source pins exactly,
+including the inherited, owner-documented read-only Actions grant for that
+summary. The Story 7 repair adds no workflow permission. Keep both reviewer
+paths in the scripts filter, every required gate need/result, legitimate skip
+predicate and exact PR Validation name/`!cancelled()` condition. Default-false
+opt-in, fixed root/heavy selectors, fresh first-heavy verification, advisory AI
+and empty compiled enrollment remain unchanged. The heavy-token-scope and
+other native/activation blockers remain unresolved; no exception or waiver is
+introduced here.
+
+Run current full local checks and an independent actual-integration/pin-diff
+review before the one combined push. Record the signed new head, current-head
+Codex request/results and current CI on draft #133 after they exist; stale
+head reviews remain historical. The coordinator sequences propagation to the
+prepared Story 8 repair and consumer pin refreshes. This existing chat edits
+only Story 7, creates no successor chat and does not touch the waiting Story 8
+commit or any consumer branch. The earlier serial handoff instructions above
+are superseded by this repair coordination.
+
+
+Reconciliation local validation: **310 tests passed**, zero failures/skips
+(157 scripts, 112 action logic, 41 runner-host). The focused AI/native/Codex/
+queue-wait selection passed **128 tests**, zero failures/skips. Exact-pin and
+generated-equivalence checks first caught stale source, then passed after the
+authoritative pin update and regeneration. All workflow YAML parsed; explicit
+JavaScript/module syntax, generation, diff and all nine inherited source-hash
+checks passed. Inherited canonical reviewer, gate, queue-wait and other main
+workflow definitions match `6bb5ca4c0af6687cfed409d649b83aec3499da32`; the CI
+workflow differs only by the retained two reviewer paths in its scripts filter.
+
+Local actionlint 1.7.12 passed; zizmor 1.11.0 offline/high passed with its two
+existing suppressions. Their temporary release archives were rechecked against
+the original official digests before use. Full preflight used the inspected
+PATH-only dscl unavailable fixture and process visibility for the previously
+documented Mac account/process fixtures; no source/system workaround or hook
+execution is claimed. Docker/pipx wrappers remain unavailable; the separate
+exact-version lint runs above supply local lint coverage, not online audits.
+Logs: `/tmp/ci-ai-reconcile-{preflight,scripts,focused,actionlint,zizmor}.log`.
+
+Cross-repository upstream pin provenance was checked from each owning repository:
+Claude action v1.0.286's annotated tag resolves to `acfe7992852970efb4fee683d63d628e3e52df67`;
+dependency-review v5.0.1 resolves to `bbc44d14a204704ccc493733616cd1e93a0321ec`;
+create-github-app-token v3.4.0 resolves to `f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc`.
+These are inherited main pin advances, not new selections in this repair.
+Story 6's GitHub commit verification is valid and its action source matches the
+retained manifest. Native/live proofs and every enrollment/activation blocker
+remain outstanding despite deterministic checks.

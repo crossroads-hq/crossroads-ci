@@ -2,8 +2,11 @@
 
 Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298).
-FROM/TARGET exact Story 7 `codex/ci-admission-ai` at
-`31c1e265fc0741ddb1de4a550e0a94337d6b1973` (draft #133).
+Current target: Story 7 `codex/ci-admission-ai` at
+`337a4f18e482e686241f6c0d32a7c7e13ea86840` (draft #133).
+Original Story 8 delivery was stacked from Story 7
+`31c1e265fc0741ddb1de4a550e0a94337d6b1973`; the 2026-11-24 reconciliation
+merges the updated base forward without rewriting published history.
 Approved unmerged source dependencies are not runtime acceptance.
 
 ## Candidate findings recorded before correction
@@ -229,3 +232,45 @@ reconciles upstream Stories 2/3/6/7. After the final Story 7 head arrives, merge
 it forward, run full checks/re-review, and publish one combined validated batch.
 No successor dispatch is authorized by this repair. All three existing activation
 blockers, dormant source behavior and absent executor remain unchanged.
+
+
+## 2026-11-24 forward integration and repair evidence
+
+The owner released prepared local SSH-signed repair
+`bf2ee23eadaa8d22774310f880a97a8bb1b88c45` (parent original published
+`ce38e923872316a8e1c7b4953be0cfee79f4c1e3`) for one combined push with the
+forward merge of exact updated Story 7
+`337a4f18e482e686241f6c0d32a7c7e13ea86840`. That base targets Story 6
+`0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`. The merge was conflict-free.
+No predecessor or other consumer branch is changed by Story 8.
+
+All four service findings were reproduced before fixes: 4 failures among 23
+writer tests; after fixes all 23 passed. The prepared repair passed 313 local
+tests (180 scripts, 92 actions, 41 runner-host) and independent 120 focused tests,
+with additional independent both-phase assigned-ID, malformed-audit and repeated
+stop/reopen/terminal-drain probes. Those are pre-integration results; final
+integration gate and independent review receipts are posted separately.
+
+Confirmed creation now requires a positive assigned ID at reopen and publication;
+the sentinel is restricted to disposable create checks. Audit includes every
+changed managed obligation even if its journal is unchanged, preserving execution,
+App, owner and permit provenance. Audit bounds are projected only when canonical
+safety validation is known; rejected safety gives null bounds while legitimate
+Held evidence may retain validated numeric bounds. Stop before a rerun's dispatch
+fence records no mutation while retaining its fenced never-dispatched journal,
+original execution, counters and owner reentry charge. It still retains capacity
+until complete whole-run/all-attempt terminal settlement. Once a dispatch fence
+exists, uncertainty remains unresolved and cannot be reclassified by stop.
+
+Relative to the current Story 7 base, all workflows, action source, inherited
+admission policy/native decoder, queue-wait behavior, gate needs/results/skip
+semantics and generated-reviewer freshness are preserved. Shared admission action
+pins now come from that updated base at Story 6 `0a0ab8db...`; original
+`31b0f172...` pin references elsewhere in this document are historical source
+receipts, not current workflow instructions. The fixed original nine-file
+admission source manifest remains historical and its contents remain unchanged;
+the current writer manifest covers this draft's modified controller/writer/tests.
+The earlier successor instructions above are historical delivery context. This
+repair creates no successor and changes no consumer; the coordinator owns further
+handoffs. All three activation blockers remain deferred and the writer stays
+DISABLED with no executor, enrollment, provisioning or activation.
