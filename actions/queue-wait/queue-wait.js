@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const MAX_PAGES = 10;
 const DEFAULT_WARN_MINUTES = 20;
 const REQUEST_TIMEOUT_MS = 15000;
+const DEADLINE_MS = 30000;
 
 function parseThreshold(raw) {
   const text = String(raw ?? "").trim();
@@ -125,7 +126,7 @@ async function fetchJobs({ fetchImpl, apiUrl, repo, runId, token, timeoutMs = RE
       return { error: `request failed (${error.message})` };
     }
     if (!response.ok) {
-      const hint = response.status === 403 || response.status === 404 ? "; the job token may lack actions: read" : "";
+      const hint = response.status === 403 || response.status === 404 ? "; grant actions: read to the job's GITHUB_TOKEN" : "";
       return { error: `HTTP ${response.status}${hint}` };
     }
     if (body === undefined) return { error: "response was not valid JSON" };
@@ -140,7 +141,9 @@ async function fetchJobs({ fetchImpl, apiUrl, repo, runId, token, timeoutMs = RE
   return { error: `job list incomplete (${jobs.length} of ${total})` };
 }
 
-async function main(env = process.env, fetchImpl = globalThis.fetch, now = new Date().toISOString()) {
+// Composite steps have no timeout-minutes, so the limit lives here: a per-request
+// timeout inside fetchJobs and one hard deadline over the whole report.
+async function main(env = process.env, fetchImpl = globalThis.fetch, now = new Date().toISOString(), deadlineMs = DEADLINE_MS) {
   const { minutes: threshold, valid } = parseThreshold(env.WARN_AFTER_MINUTES);
   const out = [];
   let note = valid ? "" : `warn-after-minutes was not a non-negative number; using ${DEFAULT_WARN_MINUTES}.`;
@@ -149,13 +152,13 @@ async function main(env = process.env, fetchImpl = globalThis.fetch, now = new D
   if (!repo || !runId || !token || typeof fetchImpl !== "function") {
     note = "Queue wait unknown: repository, run id, token or fetch was unavailable.";
   } else {
-    const result = await fetchJobs({
+    const result = await withTimeout(deadlineMs, () => fetchJobs({
       fetchImpl,
       apiUrl: env.GITHUB_API_URL || "https://api.github.com",
       repo,
       runId,
       token,
-    });
+    })).catch((error) => ({ error: `overall deadline exceeded (${error.message})` }));
     if (result.error) note = `Queue wait unknown: ${result.error}.${note ? " " + note : ""}`;
     else rows = result.jobs.map((job) => analyzeJob(job, now));
   }

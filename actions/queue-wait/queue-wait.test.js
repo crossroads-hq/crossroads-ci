@@ -127,3 +127,52 @@ test("an empty valid job list says no jobs were returned", async (t) => {
   const r = await main(env(), async () => ok({ total_count: 0, jobs: [] }), NOW);
   assert.match(r.summary, /No jobs returned/);
 });
+
+test("a 403 prints an unknown note that says to grant actions: read, with no table", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const r = await main(env(), async () => ({ ok: false, status: 403 }), NOW);
+  assert.match(r.summary, /Queue wait unknown: HTTP 403; grant actions: read/);
+  assert.doesNotMatch(r.summary, /\| Job \|/);
+  assert.deepEqual(r.warnings, []);
+});
+
+test("an overall deadline ends a slow multi-page report as unknown", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const slow = async () => { await new Promise((r) => setTimeout(r, 15)); return ok({ total_count: 1000, jobs: [job()] }); };
+  const r = await main(env(), slow, NOW, 40);
+  assert.match(r.summary, /overall deadline exceeded/);
+});
+
+// The gate action wires the script in for every fleet caller.
+const gateAction = JSON.parse(execFileSync("ruby", ["-ryaml", "-rjson", "-e",
+  "puts JSON.generate(YAML.safe_load(File.read(ARGV.fetch(0))))", path.join(__dirname, "../gate/action.yml")], { encoding: "utf8" }));
+const steps = gateAction.runs.steps;
+const waitSteps = steps.filter((s) => /Queue wait summary/.test(s.name));
+const checkIndex = steps.findIndex((s) => /Check required results/.test(s.name));
+
+test("the gate action defaults queue wait on, with a 20 minute threshold", () => {
+  assert.equal(gateAction.inputs["queue-wait"].default, "true");
+  assert.equal(gateAction.inputs["warn-after-minutes"].default, "20");
+  assert.deepEqual(Object.keys(gateAction.inputs).slice(0, 2), ["results", "allow-skipped"]);
+});
+
+test("queue-wait steps run before the check, never fail the job, and honour the opt-out", () => {
+  assert.equal(waitSteps.length, 2);
+  for (const step of waitSteps) {
+    assert.ok(steps.indexOf(step) < checkIndex);
+    assert.equal(step["continue-on-error"], true);
+    assert.match(step.if, /!cancelled\(\)/);
+    assert.match(step.if, /inputs\.queue-wait != 'false'/);
+    assert.deepEqual(Object.keys(step.env).sort(), ["GITHUB_TOKEN", "WARN_AFTER_MINUTES"]);
+    assert.match(step.run, /\.\.\/queue-wait\/queue-wait\.js/);
+    assert.doesNotMatch(step.run, /\$\{\{ (inputs|github\.token)/);
+  }
+  assert.ok(fs.existsSync(path.join(__dirname, "queue-wait.js")));
+});
+
+test("the check step and its inputs are unchanged", () => {
+  const check = steps[checkIndex];
+  assert.equal(check.env.RESULTS, "${{ inputs.results }}");
+  assert.equal(check.env.ALLOW_SKIPPED, "${{ inputs.allow-skipped }}");
+  assert.equal(steps.filter((s) => /Check required results/.test(s.name)).length, 2);
+});

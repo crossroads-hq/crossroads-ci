@@ -38,9 +38,47 @@ inputs:
     required: false
     default: ""
 
+  queue-wait:
+    description: >-
+      Write a per-job table of runner queue wait (job created to job started)
+      next to run time into the run summary, and warn about long waits. On by
+      default; the string false turns it off. Informational only: it never
+      changes the gate result. The calling job needs actions read on its
+      token; without it the summary says the wait is unknown.
+    required: false
+    default: "true"
+  warn-after-minutes:
+    description: Queue wait, in minutes, above which a warning annotation is emitted.
+    required: false
+    default: "20"
+
 runs:
   using: composite
   steps:
+    # Runs BEFORE the check so a failing gate cannot hide it. Informational:
+    # continue-on-error, a script that always exits 0, and its own deadline
+    # (composite steps have no timeout-minutes). The script is a sibling
+    # directory: the whole repository is downloaded at the caller's pin.
+    - name: Queue wait summary (POSIX)
+      if: ${{ !cancelled() && runner.os != 'Windows' && inputs.queue-wait != 'false' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        WARN_AFTER_MINUTES: ${{ inputs.warn-after-minutes }}
+      run: node "${{ github.action_path }}/../queue-wait/queue-wait.js"
+
+    - name: Queue wait summary (Windows)
+      if: ${{ !cancelled() && runner.os == 'Windows' && inputs.queue-wait != 'false' }}
+      continue-on-error: true
+      shell: powershell
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        WARN_AFTER_MINUTES: ${{ inputs.warn-after-minutes }}
+      run: |
+        node "${{ github.action_path }}/../queue-wait/queue-wait.js"
+        exit 0
+
     # Two OS-gated invocations of the same file, because the fleet's runners
     # do not share a shell: the Windows backup has no bash (its first routed
     # gate died on `bash: command not found`), and macOS has no powershell.
