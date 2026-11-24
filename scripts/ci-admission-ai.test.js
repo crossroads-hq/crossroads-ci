@@ -12,7 +12,7 @@ const parse = text => {
   return JSON.parse(r.stdout);
 };
 const legacy = parse(legacyText), admitted = parse(admittedText);
-const pin = 'e627853734c095ad2a35d95d47b6089107310ae4';
+const pin = '4772d24aad4c7dde1031541289f331ea33506b2a';
 const rootJob = admitted.jobs['admission-ai'], heavy = admitted.jobs.review;
 const old = legacy.jobs.review;
 const preflight = heavy.steps[0];
