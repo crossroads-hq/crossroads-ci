@@ -170,6 +170,14 @@ jobs:
     needs: [changes, workflow-lint, scripts, supply-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read lets the gate's queue-wait step list this run's jobs. Owner-
+    # accepted waiver (2026-11-24) of AGENTS.md "Trust boundary", first bullet:
+    # a read-only token alongside ./actions/gate, which is PR-controlled here
+    # anyway. Do not widen beyond actions: read. A job-level grant replaces the
+    # workflow-level one, so contents stays explicit.
+    permissions:
+      contents: read
+      actions: read
     steps:
       # Local composite (`./actions/gate`): checkout required so action.yml
       # is on disk. Fleet callers use the remote pin and omit this step.

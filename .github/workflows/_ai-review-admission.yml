@@ -127,7 +127,7 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Verify AI launch without waiting for heavy
-        uses: crossroads-hq/crossroads-ci/actions/admission-root@31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2 # HQ-085 Story 6 draft #132
+        uses: crossroads-hq/crossroads-ci/actions/admission-root@0a0ab8dbde95575b7a5e4fae51a738c04e1528cb # HQ-085 Story 6 draft #132
 
   review:
     name: AI review
@@ -183,7 +183,7 @@ jobs:
       # Every actual attempt verifies before ANY checkout, install or reviewer.
       # No cached root output, caller-selected identity or fail-open fallback.
       - name: Verify fresh AI job before checkout
-        uses: crossroads-hq/crossroads-ci/actions/admission-checkout@31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2 # HQ-085 Story 6 draft #132
+        uses: crossroads-hq/crossroads-ci/actions/admission-checkout@0a0ab8dbde95575b7a5e4fae51a738c04e1528cb # HQ-085 Story 6 draft #132
 
       # First, and pure arithmetic, so a misconfigured budget is refused before
       # anything is spent. `codex-wait-seconds` is bounded in check.js
@@ -749,7 +749,7 @@ jobs:
         # rather than seconds; re-measure before raising this default or the
         # Codex wait.
         timeout-minutes: ${{ inputs.review-timeout-minutes }}
-        uses: anthropics/claude-code-action@d5f7970ae232b6039636a16ea7f251e58e814f38 # v1.0.272
+        uses: anthropics/claude-code-action@acfe7992852970efb4fee683d63d628e3e52df67 # v1.0.286
         with:
           anthropic_api_key: ${{ secrets.anthropic-api-key }}
           # Off unless a consumer asks for it. 74b8b5c hardcoded this true to
