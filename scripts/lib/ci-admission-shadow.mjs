@@ -12,6 +12,11 @@ const id = n => Number.isSafeInteger(n) && n > 0;
 const clock = n => Number.isSafeInteger(n) && n >= 0 && n <= 8640000000000000;
 const fresh = (at, now) => clock(at) && at <= now && now - at <= CANDIDATES.evidenceMs;
 const tag = s => typeof s === 'string' && /^[a-zA-Z0-9_.\/-]{1,64}$/u.test(s);
+// Literal branch names, not command tags or checkout shorthand. Match Git's
+// branch-ref rules without normalization: https://git-scm.com/docs/git-check-ref-format
+const branchRef = s => typeof s === 'string' && s.length > 0 && s !== 'HEAD' && !s.startsWith('-') &&
+  !/[\u0000-\u0020\u007f~^:?*\[\\]/u.test(s) && !s.includes('..') && !s.includes('@{') && !s.endsWith('.') &&
+  s.split('/').every(part => part.length > 0 && !part.startsWith('.') && !part.endsWith('.lock'));
 const clone = x => JSON.parse(JSON.stringify(x));
 const ensure = b => { if (!b) throw new Error('Unknown shadow evidence or state'); };
 const answer = (status, reason, selected = []) => ({ status, reason, selected, effects: [] });
@@ -64,7 +69,7 @@ function validateState(s) {
 // holds the graph; branch strings are identity data and never used as file paths.
 function graph(e, now) {
   ensure(scope(e?.repoIds) && complete(e, now, n => id(n.id) && id(n.pr) && APPROVED.repoIds.includes(n.repoId) &&
-    tag(n.headRef) && tag(n.baseRef) && typeof n.open === 'boolean' && typeof n.draft === 'boolean' && n.refsKnown === true));
+    branchRef(n.headRef) && branchRef(n.baseRef) && typeof n.open === 'boolean' && typeof n.draft === 'boolean' && n.refsKnown === true));
   const nodes = e.items.filter(n => n.open), map = new Map(nodes.map(n => [prKey(n), n]));
   ensure(map.size === nodes.length);
   const parents = new Map(), roots = new Map(), ancestors = new Map();
@@ -192,7 +197,10 @@ function choose(s, f, now) {
       groups.sort((a, b) => order(a[0], b[0]));
       const r = groups[0]?.sort((a, b) => Number(b.mandatory) - Number(a.mandatory) || order(a, b))[0];
       if (!r) continue;
-      if (initialAuthority(s, r) || capacity(s, f.capacity, now, r.input.repoId) <= 0) continue;
+      const retainedRepos = new Set([r.input.repoId, ...active(s).map(o => o.input.repoId)]);
+      // Adding one reservation consumes one unit in every retained repository's
+      // conservative placement, so each must have positive room BEFORE adding it.
+      if (initialAuthority(s, r) || [...retainedRepos].some(repoId => capacity(s, f.capacity, now, repoId) <= 0)) continue;
       if (r.mode === 'recovery' && active(s).some(o => sameRun(o.execution, r.execution))) continue;
       ensure(s.obligations.length < MAX_RECORDS && id(s.generation + 1));
       const generation = ++s.generation;

@@ -402,3 +402,40 @@ test('stop cannot classify an already-fenced uncertain rerun as never dispatched
     checkpoint: 'before_checkout', outcome: 'held' }), /Unknown/);
   assert.equal(r.c.snapshot(T).reservations.length, 1);
 });
+
+test('audit-only stop excludes same owner IDs with another immutable head or workload', async t => {
+  for (const change of [i => ({ ...i, head: 'f'.repeat(40) }), i => ({ ...i, workload: 'Validate' })]) {
+    const r = await rig(t), i = input(); queue(r, i);
+    const proof = ownerCheck(i, T); r.send('owner', proof);
+    const f = writerFrame(i); f.ownerChecks = [proof]; f.terminal = [terminal(execution(i, 100, 2, 2000))];
+    r.send('writer-reserve', { frame: f });
+    const other = change(i), wrong = structuredClone(proof);
+    wrong.expected.input = other; wrong.expected.rootInputs = [other];
+    wrong.observation.attempt.input = other; wrong.observation.refs.input = other;
+    wrong.observation.jobs.items[0].workload = other.workload;
+    r.send('writer-stop', { frame: { ownerChecks: [wrong] } });
+    const a = JSON.parse(r.db.prepare("SELECT body FROM shadow_audit WHERE kind = 'writer-stop'").get().body);
+    assert.deepEqual(a.writer.ownerChecks, []);
+    assert.equal(a.writer.targets[0].input.head, i.head);
+    assert.equal(a.writer.targets[0].input.workload, i.workload);
+  }
+});
+
+test('multi-root owner audit projects the matched durable root rather than the representative input', async t => {
+  const r = await rig(t), i = input(); queue(r, i);
+  const proof = ownerCheck(i, T); r.send('owner', proof);
+  const f = writerFrame(i); f.ownerChecks = [proof]; f.terminal = [terminal(execution(i, 100, 2, 2000))];
+  r.send('writer-reserve', { frame: f });
+  const multi = structuredClone(proof), representative = { ...i, workload: 'AI' };
+  multi.expected.input = representative; multi.expected.rootInputs = [representative, i];
+  multi.observation.attempt.input = representative; multi.observation.refs.input = representative;
+  r.send('writer-stop', { frame: { ownerChecks: [multi] } });
+  const a = JSON.parse(r.db.prepare("SELECT body FROM shadow_audit WHERE kind = 'writer-stop'").get().body);
+  const { inputKey } = await import('./lib/ci-admission.mjs');
+  assert.equal(a.writer.ownerChecks.length, 1); const row = a.writer.ownerChecks[0];
+  assert.equal(row.inputKey, inputKey(i)); assert.equal(row.refs.inputKey, inputKey(i));
+  assert.equal(row.ownerKey, a.writer.targets[0].ownerKey);
+  assert.equal(row.rootJobId, 2000); assert.equal(row.workload, 'Verify');
+  assert.equal(row.permission.actorId, 37964907); assert.equal(row.permission.observedAt, T);
+  assert.equal(row.attempt.observedAt, T); assert.equal(row.jobs.complete, true);
+});

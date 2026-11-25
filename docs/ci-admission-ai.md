@@ -4,9 +4,9 @@ Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298). Source-only, default OFF.
 
 Current target and admission action source: Story 6 `codex/ci-admission-actions`
-at `0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`,
-[draft #132](https://github.com/crossroads-hq/crossroads-ci/pull/132), after the
-2026-11-24 forward reconciliation below. The original target was
+at `4772d24aad4c7dde1031541289f331ea33506b2a`,
+[PR #132](https://github.com/crossroads-hq/crossroads-ci/pull/132), after the
+2026-11-25 startup-hook security repair propagation below. The original target was
 `31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`; earlier evidence remains historical.
 Its GitHub commit verification is `verified:true`, `reason:valid`; both remote
 action pins use that exact source, with its existing source hash manifest checked
@@ -285,3 +285,162 @@ These are inherited main pin advances, not new selections in this repair.
 Story 6's GitHub commit verification is valid and its action source matches the
 retained manifest. Native/live proofs and every enrollment/activation blocker
 remain outstanding despite deterministic checks.
+
+## Additional Story 3 fix propagation — 2026-11-24
+
+The owner authorized serial forward propagation through the existing #132–#134
+chats, with fresh Codex reviews and current CI/security follow-through, without
+merging PRs, provisioning or activation. This Story 7 chat owns only #133 and
+preserves the owner's existing ready state; it performs no readiness action.
+The coordinator releases #134 after verified publication here. No successor
+chat, consumer change or other branch write is part of this work.
+
+Forward-merge exact Story 6 `e627853734c095ad2a35d95d47b6089107310ae4` into
+published Story 7 `337a4f18e482e686241f6c0d32a7c7e13ea86840`, preserving both
+histories. Story 6 has parents its previous `0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`
+and authoritative Story 3 `7dae1ecae87f4bfcb57ddc8aab6743342a8c0957`.
+The imported fixes check prospective capacity in every retained repository and
+accept Git-compatible literal head/base graph refs, with five upstream
+regressions. The inherited shadow module/test/docs and source manifest remain
+exactly those of the authoritative Story 6 source. No controller policy fork,
+action API/protocol/enrollment change or new production integration is added.
+
+Only two manifest entries advance: shadow module
+`14384eb9a289057d23ab494429b2420bd770b592a4d5ca4c4e73ddb8ed7c2dec` and
+shadow tests `44c442816e4198fb1ffc961ea15cac22a48390ff8fa4d7fa4b02d7e8ef03987b`.
+The other seven action/native/policy source entries are unchanged. Earlier
+nine-source equality observations and local/review receipts above are
+historical, not proof that these two sources stayed unchanged or certification
+of the new head. The current inherited manifest is checked in full.
+
+Advance the authoritative generator and regression expectations for both remote
+admission actions to exact `e627853734c095ad2a35d95d47b6089107310ae4`, then
+regenerate the admitted counterpart. Current main's canonical reviewer,
+third-party pins, queue-wait/gate behavior and the Story 7 script-filter
+correction remain untouched. Fixed runner selectors, default-false opt-in,
+empty compiled enrollment, advisory AI and fresh actual-heavy verification
+remain. The known heavy-token scope blocker is not waived or resolved.
+
+Mandatory local gates, scripts tests, changed-area tests, explicit syntax/hash/
+generation checks and independent final actual-diff review precede the one
+normal Git push. Commit signing/GitHub verification, exact new-head Codex
+request and current CI/code/security results are recorded on #133 after they
+exist. No settings, App, permission, budget, deployment or CI cancel/rerun
+operation is authorized. The coordinator is notified if material predecessor
+feedback arrives; publication pauses in that case.
+
+
+Additional propagation local validation: **315 tests passed**, zero
+failures/skips (162 scripts, 112 action logic, 41 runner-host). The focused
+AI/shadow/native/canonical/Codex/queue-wait selection passed **181 tests**,
+zero failures/skips. Exact-pin expectations first rejected the stale generated
+counterpart, then all 11 Story 7 cases passed after authoritative update and
+regeneration. All workflow YAML, explicit module/JavaScript syntax, generated
+consistency, current nine-source hashes and diff checks passed.
+
+The imported shadow module/test/docs and current source manifest compare
+exactly to `e627853734c095ad2a35d95d47b6089107310ae4`. The two changed manifest
+entries match the hashes above; the other seven retain their earlier values.
+Canonical reviewer/gate/queue-wait source remains exact current main
+`6bb5ca4c0af6687cfed409d649b83aec3499da32`. This repair adds no permission,
+selector, third-party pin, action protocol or enrollment change.
+
+Exact local actionlint 1.7.12 and zizmor 1.11.0 offline/high passed with two
+existing suppressions; temporary archives were checked against their original
+official digests. Full preflight used the previously documented inspected
+PATH-only dscl-unavailable fixture and process visibility for existing Mac
+account/process fixtures, with no source/system workaround. Docker/pipx
+wrappers are unavailable; separate exact-version tools supply local lint,
+not online audit evidence. No TypeScript/build toolchain or pre-push hook
+execution is claimed. Logs: `/tmp/ci-ai-propagate-{preflight,scripts,focused,actionlint,zizmor}.log`.
+
+Independent final actual-diff review, signed merge, current GitHub commit
+verification and exact-head CI/code/security receipts follow on #133 after
+completion. Earlier successful heads are not substituted for current-head
+results. The current owner-set ready state and all owner activation gates
+remain unchanged.
+
+## Reviewed startup-hook repair propagation — 2026-11-25
+
+The owner explicitly approved signed local forward merges through #133/#134
+once exact-head CI and fresh security pass, using existing chats, with no PR
+merge, provisioning or activation. The coordinator exclusively released this
+Story 7 chat after independently verifying authoritative #132
+`4772d24aad4c7dde1031541289f331ea33506b2a`: current PR Validation, code and
+security passed. The source signatures and exact-head receipts were refreshed
+here before merging. This ends the earlier source-write hold for this exact
+release only; it does not approve any owner activation gate or downstream work.
+
+Forward-merge exact `4772d24aad4c7dde1031541289f331ea33506b2a` into preserved
+Story 7 `320283ce0a8220fc32a19cdded49350fe35b60dc`, with no history rewrite.
+Its upstream history is e627 → `1246ff6500bd0f36936f8284fd5bbe643dc7ef91`
+(security repair) → `4772d24aad4c7dde1031541289f331ea33506b2a`
+(portable test-fixture follow-up). The latter changes only the entrypoint test
+and its hash/evidence; production guards remain identical to the security fix.
+The imported actions, entrypoint tests, current ten-source manifest and action
+contract documentation remain byte-exact to this authoritative Story 6 head.
+
+The startup-hook P2 `discussion_r4687002573` is addressed by the owning #132
+repair, not waived because enrollment is empty. Both action entrypoints use
+only fixed trusted `/usr/bin/node` on Linux, never Bash or caller/runner PATH.
+Twenty-eight loader-key presence guards, including empty and legacy cases,
+refuse before interpreter launch; Node/shell startup controls are cleared.
+Unsafe loader state fails rather than skipping verification. Missing trusted
+interpreter or unsupported platform fails closed without fallback. No guard,
+interpreter requirement or test is weakened by Story 7 propagation.
+
+The fixed protected host/interpreter integrity and Node 22+ prerequisite still
+require later owner setup/native proof. The 18 entrypoint fixtures map the
+fixed Linux interpreter to their test process consistently on all hosts; they
+prove local runner-contract behavior, not that a real fleet host satisfies the
+production path prerequisite or that native action/admission drills passed.
+No host install/configuration, runtime activation or live credential is used.
+
+The current source manifest now has **ten entries**: the two action declaration
+hashes advance and the entrypoint test source is added; the seven other
+existing source entries remain unchanged from e627. Earlier nine-source and
+two-shadow-entry observations remain historical. The current ten-source
+manifest, canonical shadow fixes and fixed interpreter security boundary are
+verified in full on this integration candidate.
+
+Advance both generator-owned admission pins and focused expectations to full
+`4772d24aad4c7dde1031541289f331ea33506b2a`, then regenerate the counterpart.
+Current main canonical reviewer/third-party pins, default workflow, gates/
+needs/results/authorized skips/fork/draft guards, fixed selectors, default OFF,
+empty enrollment, advisory AI and heavy-token scope blocker remain unchanged.
+No action API/protocol, generic dependency or consumer pin advance is added.
+
+Full local gates, scripts/changed-area/18-entrypoint tests, explicit syntax,
+ten hashes and generated consistency plus fresh independent actual-diff/
+security-boundary review precede the one normal signed batch push. Every PR
+commit is verified on GitHub and a new exact-head Codex review is requested.
+The coordinator receives safe-publication evidence promptly but keeps #134
+held until this new head's CI, code and security all pass. No successor is
+created; this chat owns only #133 and preserves its owner-set ready state.
+
+
+Security-repair propagation local validation: **333 tests passed**, zero
+failures/skips (162 scripts, 130 action logic including all 18 entrypoint
+cases, 41 runner-host). The focused AI/shadow/native/canonical/entrypoint/
+Codex/queue-wait selection passed **199 tests**, zero failures/skips. All 11
+Story 7 exact-pin/generated cases passed after the recorded stale-pin refusal
+and regeneration. The imported declarations, entrypoint test, ten-entry
+manifest and action documentation compare exactly to the released source.
+
+Explicit YAML and JavaScript/module syntax, all ten current source hashes,
+generated consistency and whitespace checks passed. Local actionlint 1.7.12
+and zizmor 1.11.0 offline/high passed with two existing suppressions; their
+temporary archives were rechecked against official digests. Full preflight
+uses the previously documented inspected PATH-only dscl-unavailable fixture
+and process visibility for existing Mac account/process cases. No source/
+system workaround, host install or pre-push hook execution is claimed.
+Docker/pipx wrappers remain unavailable; the separate exact-version lint
+checks are local/offline evidence. This repository has no TypeScript/build
+toolchain. Logs: `/tmp/ci-ai-security-prop-{preflight,scripts,focused,actionlint,zizmor}.log`.
+
+The original #132 startup-hook thread is resolved with its fix and fresh
+4772 CI/code/security receipts. That source result is not substituted for the
+new Story 7 head: its own signed commit verification, fresh independent
+integration/security-boundary review and exact-head CI/code/security receipts
+are recorded on #133 after completion. Fixed-host interpreter/native proofs,
+heavy-token scope and all other owner activation gates remain outstanding.

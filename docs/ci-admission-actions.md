@@ -4,8 +4,10 @@ Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298). Source-only, disabled.
 
 The original delivery evidence below belongs to the 2026-11-21 source. The
-[2026-11-24 reconciliation](#story-6-reconciliation--2026-11-24) records the
-current stack; earlier heads, review receipts and test counts remain historical.
+[additional Story 3 propagation](#additional-story-3-propagation--2026-11-24)
+records that propagation. The startup-hook security repair below records the
+current action boundary. The first 2026-11-24 reconciliation and earlier
+heads, review receipts, source-equality observations and test counts are historical.
 
 ## Inherited findings recorded before correction
 
@@ -84,7 +86,9 @@ actual jobs; this action never renumbers them or releases reservations.
 
 Both actions have no inputs, outputs or nested `uses:`. They invoke only the
 trusted shipped Node module via GITHUB_ACTION_PATH, with the workflow's
-`github.token` scoped to the verification step. Future callers must grant only
+`github.token` scoped to the verification step. The later startup repair below
+replaces the original Bash/PATH launch boundary with a fixed Linux interpreter
+and pre-execution loader rejection. Future callers must grant only
 Actions/Checks/Contents/Pull requests read and retain Metadata read, use trusted
 full-SHA remote actions, and execute no PR-controlled step/action/install hook
 before verification. Existing fleet Node (22+) is required; no setup installer
@@ -254,6 +258,11 @@ acceptance uses existing CI #129/HQ #298.
 
 ## Story 6 reconciliation — 2026-11-24
 
+This first reconciliation was published at
+`0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`. Its source-equality observations
+describe that head; the additional propagation below supersedes the two shadow
+source hashes while preserving the other seven manifest entries.
+
 The owner authorized repairs and forward reconciliation in the existing chats,
 without provisioning or activation. Draft #132 still targets
 `codex/ci-admission-shadow`. Merge exact Story 3 head
@@ -264,14 +273,14 @@ main `6bb5ca4c0af6687cfed409d649b83aec3499da32`. Their fetched heads matched
 the live draft identities; every commit listed in drafts #130 and #131 was
 GitHub-verified before adoption.
 
-Story 3 now owns the four controller corrections and their exact regressions.
-Its controller module and test file are byte-for-byte identical to the copies
-already delivered in Story 6. The forward merge needs no conflict resolution,
-no duplicate patch and no native behavior change. Story 6's action modules,
-canonical contracts, native fixtures and both action declarations are unchanged.
-All nine entries in `ci-admission-actions-source.sha256` still match; the manifest
-therefore remains valid for those files without changing any original hash or
-claiming that it covers unrelated main files or documentation.
+At this first reconciliation, Story 3 owned the four controller corrections and
+their exact regressions. Its controller module and test file were byte-for-byte
+identical to the copies already delivered in Story 6. The forward merge needed
+no conflict resolution or duplicate patch. Story 6's action modules, canonical
+contracts, native fixtures and both action declarations were unchanged. All nine
+manifest entries matched at `0a0ab8d`; that historical observation covered those
+files, not unrelated main files or documentation. The current manifest records
+the later inherited shadow changes described below.
 
 The merge retains main's queue-wait action, its default-on gate summary, its
 tests and the action-pin advances exactly as present in Story 3. They are
@@ -289,3 +298,136 @@ head and exact-head Codex request/results are recorded on draft #132 after they
 exist. Original 279-test and review receipts above do not certify the new head.
 The coordinator owns propagation to the existing Story 7/8 and consumer chats;
 this reconciliation creates no successor chat and edits only Story 6's branch.
+
+## Additional Story 3 propagation — 2026-11-24
+
+The owner requested serial propagation through the existing PR stack and fresh
+exact-head CI, code and security review. PR #132 was originally opened as a
+draft and has since been marked ready by the human owner. Preserve its current
+`isDraft: false`; this source update makes no readiness, settings or activation
+change. The coordinating repair chat owns subsequent #133/#134 handoffs.
+
+Merge authoritative Story 3 head
+`7dae1ecae87f4bfcb57ddc8aab6743342a8c0957` forward into Story 6 head
+`0a0ab8dbde95575b7a5e4fae51a738c04e1528cb`, retaining both histories and
+the target `codex/ci-admission-shadow`. The inherited change touches only the
+shadow controller, its tests and Story 3 documentation: candidate admission
+checks the candidate and every retained repository before adding a reservation;
+graph head/base refs use a Git-compatible literal branch validator while command
+and policy tags retain their strict validator. The five inherited regressions
+cover both split-group orders, the unused-repository control, valid literal refs
+and malformed refs. No native/action/policy/workflow code is changed here.
+
+The source manifest advances **two entries** to the inherited files:
+
+- Shadow module: `14384eb9a289057d23ab494429b2420bd770b592a4d5ca4c4e73ddb8ed7c2dec`.
+- Shadow tests: `44c442816e4198fb1ffc961ea15cac22a48390ff8fa4d7fa4b02d7e8ef03987b`.
+
+The other seven entries remain byte-identical to `0a0ab8d`: canonical contracts,
+native decoder/tests, read/verify modules and root/checkout declarations. The
+previous all-nine equality claim is historical, not a current assertion. Empty
+enrollment and dormant native protocol remain intact; the branch-ref change is
+confined to the shadow graph. Main's adopted queue-wait, gate and pins are retained.
+
+Current validation, independent actual-diff review, the new locally signed head,
+all-commit GitHub verification and fresh exact-head Codex/CI/security receipts
+belong in the PR conversation after they exist. Earlier receipts do not certify
+the new head. No successor is dispatched here. Native proofs, cross-date billing,
+owner setup, acceptance/adoption and activation gates remain unwaived.
+
+## Startup-hook security repair — 2026-11-25
+
+Security review of `e627853734c095ad2a35d95d47b6089107310ae4` reported
+[P2 startup-hook exposure](https://github.com/crossroads-hq/crossroads-ci/pull/132#discussion_r4687002573).
+A synthetic-only reproduction confirmed that inherited NODE_OPTIONS ran before
+both verifier entrypoints and observed the synthetic GH_TOKEN before Admission
+held. Empty enrollment does not waive this invoked-action defect. The coordinator
+authorized a narrow entrypoint repair while downstream source updates were held.
+Earlier clean security receipts are historical and do not resolve this finding.
+
+The owner directed the bounded repair on 2026-11-25: a fixed trusted interpreter,
+poisoned GITHUB_PATH coverage, loader refusal before launch and fresh independent
+security review. Bare `node` is insufficient: the runner's managed prepend list
+can be modified by an earlier caller step. Both declarations now choose only
+`/usr/bin/node -- "{0}"` on Linux. That absolute path bypasses caller PATH and
+runner GITHUB_PATH/PrependPath lookup. Trusted host integrity and an operator-owned
+Node 22+ at that fixed path are prerequisites; no installation is performed.
+Missing interpreter or unsupported host fails closed before verification.
+
+Caller loader controls are rejected by **presence**, including empty or `0`
+values, before any child process starts. Individual `toJSON(env.KEY) == 'null'`
+checks distinguish absent keys without serializing the token-bearing environment.
+The denied set covers Linux preload/audit/search/debug/trace/profile controls,
+GLIBC_TUNABLES, Darwin insertion/search/print/closure controls and OpenSSL config/
+engine/module controls. In particular LD_TRACE_LOADED_OBJECTS and DYLD_PRINT_ENV
+must not be set to empty as a purported fix. Unsafe presence selects the fixed
+invalid `/usr/bin/node Admission-held` template, with no script placeholder:
+the runner fails the step before process creation. It never skips verification
+or treats a bypassed process as success.
+
+NODE_OPTIONS/NODE_PATH and shell startup hooks are statically empty in the step
+environment before execution. No Bash is launched. Additional Node startup,
+debug/certificate/proxy controls are reset before the fixed interpreter starts.
+Literal JavaScript imports only the shipped verifier, calls the fixed phase,
+and maps held/error outcomes to fixed Admission held failure. The token remains
+step-scoped and is neither interpolated into source nor passed on a command line.
+Enrollment, canonical identities, permits, native decoder/read/verify modules,
+workflows, gate, model and capabilities are unchanged by this security repair.
+
+The boundary follows the runner's
+[ScriptHandler](https://github.com/actions/runner/blob/aea9aaa3a0b49933412c6f59d7f05be037207a28/src/Runner.Worker/Handlers/ScriptHandler.cs)
+and [WhichUtil](https://github.com/actions/runner/blob/aea9aaa3a0b49933412c6f59d7f05be037207a28/src/Runner.Sdk/Util/WhichUtil.cs):
+absolute interpreter resolution and required-placeholder validation precede
+ExecuteAsync. The known loader-key set is explicit; this is not a claim to
+recover an already compromised host or sanitize the runner process itself.
+Protected host/runtime setup and later native drill proofs remain required.
+
+Independent candidate security review found a missing legacy loader control:
+glibc 2.35 treats LD_TRACE_PRELINKING presence as trace mode before the program
+starts, including an empty value. Node 22+ does not establish a newer glibc.
+Record this defect before correction: both declarations and the four-value
+presence regression set must include LD_TRACE_PRELINKING; no host-version waiver.
+The correction now adds that guard to both declarations and the explicit
+four-value regressions. The
+[glibc 2.35 implementation](https://github.com/bminor/glibc/blob/release/2.35/master/elf/rtld.c#L2687)
+owns this compatibility evidence; the tests remain local runner-contract fixtures.
+
+`actions/admission/entrypoint.test.js` executes both literal declarations with
+synthetic credentials only. It covers Node preload, Bash hooks/functions, fake
+step PATH and poisoned runner prepend, plus a bare-interpreter positive attack
+control. Every denied loader key is tested with empty, `0`, `1` and a path;
+these cases reject before the fixture starts a process. Clean disabled refusal,
+fixed-phase verified/held/error wiring and a script path with spaces are covered.
+The explicit runner-contract fixture maps the fixed Linux executable to the
+test process's absolute Node on every test host. Missing-interpreter cases
+reject before startup without searching attacker prepend entries. These tests
+do not establish the host's `/usr/bin/node` prerequisite, actual GitHub action
+execution or native admission acceptance.
+
+The manifest advances the two action declarations and adds this new security
+test source. Its other seven existing entries remain identical to `e6278537`.
+Earlier nine-source equality observations remain historical. Final validation,
+independent security/code review, signatures and fresh exact-head service/CI
+receipts are recorded on the PR after they exist. No readiness transition,
+branch/PR merge, permission/settings change, provisioning or activation occurs.
+
+## Linux fixture correction — 2026-11-25
+
+The first security repair head `1246ff6500bd0f36936f8284fd5bbe643dc7ef91`
+failed Scripts and profiles in run 45499932053/job 138820292848. Twelve fixed-
+interpreter child cases returned null status while prelaunch refusal and bare-
+interpreter attack controls passed. The fixture discarded spawn error/signal;
+the log therefore does not establish the exact Linux errno. A local missing
+`/usr/bin/node` reproduction returned the same null status with ENOENT. The
+fixture incorrectly assumed every Linux test host supplied the production path,
+while already virtualizing that prerequisite on macOS.
+
+The correction changes only the test harness and its evidence: it models the
+fixed trusted path with the test process's absolute Node on every host, preserves
+all literal path/loader/poisoning assertions, and adds both-entrypoint refusal
+when that trusted interpreter is unavailable even with an attacker prepend
+present. Unexpected spawn errors/signals now become explicit failures. Production's fixed
+path remains a real deployment prerequisite, with no PATH fallback, install,
+guard weakening, test skip or CI rerun. Fresh validation/review receipts must
+certify the subsequent head; earlier local passes did not prove this CI host
+met the fixed runtime prerequisite.

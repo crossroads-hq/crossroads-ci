@@ -132,23 +132,32 @@ export function writerAudit(s, before, c) {
   const ownerKeys = new Set(targets.map(o => o.ownerKey).filter(Boolean));
   const owners = ownerKeys.size && f ? f.ownerChecks : [];
   ensure(Array.isArray(owners) && owners.length <= 512);
-  const ownerEvidence = owners.filter(check => {
+  const ownerEvidence = owners.flatMap(check => {
     ensure(check?.expected?.rootInputs?.length <= 32 && check?.observation?.jobs?.items?.length <= 2048);
     const requests = ownerRequests(check.observation, check.expected, c.now);
     ensure(requests.status === 'Known');
-    return requests.items.some(q => ownerKeys.has(ownerRequestKey(q)));
+    return requests.items.flatMap(q => {
+      const key = ownerRequestKey(q), durable = s.requests.find(r => r.key === key);
+      if (!durable || !ownerKeys.has(key)) return [];
+      const request = durable.request;
+      if (!['repoId', 'runId', 'ownerAttempt', 'rootJobId', 'workload'].every(k => q[k] === request[k]) ||
+        inputKey(q.input) !== inputKey(request.input) || !targets.some(o => o.ownerKey === key &&
+          o.key === inputKey(request.input) && o.input.workload === request.workload)) return [];
+      return [{ check, request, key }];
+    });
   });
   return { mode: 'DISABLED', stopped: w.stopped, epoch: w.epoch,
     appId: first?.appId ?? null, writes: copy(changed), targets: copy(targets),
-    ownerChecks: ownerEvidence.map(check => ({
-      inputKey: inputKey(check.expected?.input),
+    ownerChecks: ownerEvidence.map(({ check, request, key }) => ({
+      ownerKey: key, rootJobId: request.rootJobId, workload: request.workload,
+      inputKey: inputKey(request.input),
       attempt: check.observation?.attempt ? { repoId: check.observation.attempt.repoId,
         runId: check.observation.attempt.runId, number: check.observation.attempt.number,
         triggeringActorId: check.observation.attempt.triggeringActorId,
         triggeringActorType: check.observation.attempt.triggeringActorType,
         observedAt: check.observation.attempt.observedAt } : null,
       jobs: source(check.observation?.jobs), refs: check.observation?.refs ? {
-        inputKey: inputKey(check.observation.refs.input), observedAt: check.observation.refs.observedAt } : null,
+        inputKey: inputKey(request.input), observedAt: check.observation.refs.observedAt } : null,
       permission: check.observation?.permission ? { actorId: check.observation.permission.actorId,
         value: check.observation.permission.value, observedAt: check.observation.permission.observedAt } : null })),
     sources: { inputs: source(f?.inputs), prs: source(f?.prs), capacity: source(f?.capacity),

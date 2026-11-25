@@ -2,8 +2,9 @@
 
 Tracking: [CI #129](https://github.com/crossroads-hq/crossroads-ci/issues/129),
 [HQ #298](https://github.com/crossroads-hq/hq/issues/298).
-Current target: Story 7 `codex/ci-admission-ai` at
-`337a4f18e482e686241f6c0d32a7c7e13ea86840` (draft #133).
+Current PR target: owner-updated `main` at
+`96cc51df8eb9fba6a2856d5574f7e5f370f514f6`, whose tree equals the adopted
+Story 7 source `c669fbb04ff363db9f9fc0ea0061f3c03fa25e30` (former draft #133).
 Original Story 8 delivery was stacked from Story 7
 `31c1e265fc0741ddb1de4a550e0a94337d6b1973`; the 2026-11-24 reconciliation
 merges the updated base forward without rewriting published history.
@@ -182,13 +183,15 @@ posted on the draft; a review request is distinct from a completed review.
 
 ## Source inheritance and next handoff
 
-The Story 6 `docs/ci-admission-actions-source.sha256` is retained as its historical
-exact-source record; its controller hash is superseded here. Verify those nine
-hashes against Story 6 `31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`, and the other
-eight unchanged files against this checkout. The new writer source manifest
-records this draft's two modules and writer tests. Trusted action source,
-canonical pure predicates, native decoder, both reviewer workflows, current
-full-SHA action pins, native gate and consumer enrollments stay unchanged.
+The current Story 6 `docs/ci-admission-actions-source.sha256` is a ten-entry
+provenance record for exact `4772d24aad4c7dde1031541289f331ea33506b2a`.
+Verify all ten entries against that source. In this writer checkout, nine entries
+match; the journal-extended shadow module legitimately differs and is covered by
+`docs/ci-admission-writer-source.sha256` alongside the writer module/tests.
+Original nine-entry receipts at `31b0f172dd985ea3fe1c45ee8eb4de35d4f02cc2`
+remain historical, not assertions about the current ten-entry file. Relative to
+the adopted Story 7 base, trusted actions, canonical predicates/native decoder,
+reviewer workflows, full-SHA pins, native gate and empty enrollments are unchanged.
 
 From: CI Engineering / in-context Portfolio, Architecture and Engineering review.
 To: independent final-diff verifier, then Story 9 Evolution engineer.
@@ -274,3 +277,57 @@ The earlier successor instructions above are historical delivery context. This
 repair creates no successor and changes no consumer; the coordinator owns further
 handoffs. All three activation blockers remain deferred and the writer stays
 DISABLED with no executor, enrollment, provisioning or activation.
+
+
+## 2026-11-25 approved security propagation
+
+The owner directly approved a signed local forward merge of exact Story 7
+`c669fbb04ff363db9f9fc0ea0061f3c03fa25e30` into Story 8, preserving every
+prior commit including `e19a1587`, `02da3ca6` and native-stack `5ffb2f1`.
+Before execution, predecessor required CI and fresh code/security receipts were
+verified at that exact source. During the approval wait the owner merged the
+predecessor stack externally: #133 and #132 report merged, and #134 now targets
+main `96cc51df8eb9fba6a2856d5574f7e5f370f514f6`. That main commit contains
+c669fbb and its tree is identical. This chat performs no GitHub PR merge or state
+transition and preserves the owner's ready state. The local merge was conflict-free.
+
+The merged shadow policy now checks prospective capacity for the candidate AND
+every retained repository before adding a reservation. Graph head/base refs use
+literal Git branch rules; command tags retain their existing validation. All five
+upstream split-group/order/unused-repository/valid/malformed-ref regressions are
+preserved, together with writer journal integration and all four prior repairs.
+
+Both imported action declarations and their 18 entrypoint cases remain byte-for-
+byte identical to reviewed Story 6 `4772d24aad4c7dde1031541289f331ea33506b2a`.
+They select only fixed Linux `/usr/bin/node`, test 28 loader-presence guards before
+process creation, clear Node startup options and avoid Bash/PATH interpreter
+selection. Portable fixtures explicitly bind their trusted interpreter and refuse
+an absent fixed interpreter without fallback. These local fixture results do not
+prove actual Linux Node22+ host integrity, installed prerequisites or native runner
+behavior; those remain owner gates. No interpreter is installed by this delivery.
+
+Story 7's generated root/checkout pins both remain full `4772d24aad4c7dde1031541289f331ea33506b2a`.
+No action/native/policy/entrypoint source is copied into a second authority. The
+upstream ten-entry manifest is verified against exact4772; only the writer-owned
+manifest is refreshed for its journal-extended shadow module. Earlier nine-entry /
+0a0ab8db / 337a4f18 receipts above describe their historical delivery states and
+are superseded for current dependencies by this section. No Evolution/UI pins
+or other consumer branches are changed. All three activation blockers remain
+explicit; the writer stays DISABLED, with no executor, enrollment, provisioning,
+activation, settings change or new API authority. Final local, independent and
+new-head CI/code/security receipts are recorded on #134 after execution.
+
+### Additional audit provenance finding (recorded before correction)
+
+A separate read-only review from the Story 1 coordinator identified another P2:
+`writerAudit` matched only the durable owner request ID tuple. On stop/bind /
+reconcile paths without a new-work guard, a canonically valid observation with
+the same IDs but a different immutable head/workload could be stored beside the
+original obligation. Multi-root observations could also project the representative
+input rather than the root actually matched. This is an audit provenance defect;
+new-work guards do not grant rights from this mismatched observation.
+
+Reproduce before changing the matcher. Bind audit entries to BOTH the exact
+persisted owner request and the targeted obligation's immutable input/workload;
+project the matched root/request identity, retaining source/permission clocks and
+valid multi-root observations. Keep unrelated observations out of audit authority.

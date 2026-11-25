@@ -4,6 +4,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
+const { spawnSync } = require('node:child_process');
 const load = () => import('./lib/ci-admission-shadow.mjs');
 const T = Date.parse('2026-11-21T10:00:00Z');
 const UI = 1305651079, EVO = 1318535693;
@@ -480,4 +481,78 @@ test('conflicting current inputs and duplicate actual initial roots cannot acqui
   assert.equal(r.send('decide', { frame: frame([a, b]) }).selected.length, 1);
   const r2 = await rig(t); queue(r2, a);
   assert.equal(r2.send('decide', { frame: frame([a, { ...a, digest: 'e'.repeat(64) }]) }).status, 'Unknown');
+});
+
+test('new reservations fit every retained repository and remain launchable in split groups', async t => {
+  for (const [smallRepo, largeRepo] of [[UI, EVO], [EVO, UI]]) {
+    const r = await rig(t), a = input(42, 'Verify', smallRepo), b = input(50, 'Validate', largeRepo);
+    const x = execution(a), y = execution(b, 200, 1, 2000);
+    r.send('queue', { input: a, execution: x, readyAt: T - 2000, mandatory: true, mode: 'initial' });
+    queue(r, b, y);
+    const f = frame([a, b]);
+    f.capacity.groups = [{ id: 1, slots: 1 }, { id: 2, slots: 2 }];
+    f.capacity.runners.forEach((runner, n) => {
+      runner.groupId = n === 0 ? 1 : 2; runner.repoIds = [n === 0 ? smallRepo : largeRepo];
+    });
+    const decision = r.send('decide', { frame: f });
+    assert.deepEqual(decision.selected.map(q => q.input.repoId), [smallRepo]);
+    assert.equal(r.c.snapshot(T).reservations.length, 1);
+    assert.equal(r.send('decide', { frame: f }).selected.length, 0);
+    r.send('permit', { generation: 1, phase: 'launch', checkId: 500, appId: 900, frame: f });
+    const bound = { ...x, heavyJobId: 1001 };
+    r.send('bind', { generation: 1, execution: bound, jobs: list([
+      job(bound, x.rootJobId, 'root', 'success'), job(bound, 1001, 'heavy', null, 'queued')]) });
+    r.send('permit', { generation: 1, phase: 'checkout', checkId: 501, appId: 900, frame: f });
+    assert.equal(r.c.snapshot(T).reservations[0].phase, 'Bound');
+  }
+});
+
+test('a repository with no retained work does not limit another repository eligible for two slots', async t => {
+  const r = await rig(t), a = input(50, 'Validate', EVO), b = input(51, 'Validate', EVO);
+  queue(r, a); queue(r, b, execution(b, 200, 1, 2000));
+  const f = frame([a, b]);
+  f.capacity.groups = [{ id: 1, slots: 1 }, { id: 2, slots: 2 }];
+  f.capacity.runners.forEach((runner, n) => {
+    runner.groupId = n === 0 ? 1 : 2; runner.repoIds = [n === 0 ? UI : EVO];
+  });
+  assert.equal(r.send('decide', { frame: f }).selected.length, 2);
+});
+
+test('valid Git branch refs on unrelated draft PRs do not suppress admission', async t => {
+  for (const headRef of ['feature/ci+metrics', `feature/${'x'.repeat(96)}`, 'feature/שלום',
+    '@', 'feature/x.LOCK', 'feature./child', "feature/quote'and$dollar;plus+"]) {
+    assert.equal(spawnSync('git', ['check-ref-format', '--branch', headRef]).status, 0, headRef);
+    const r = await rig(t), i = input(); queue(r, i);
+    const f = frame([i]); f.prs.items.push({ id: 999, repoId: EVO, pr: 99,
+      headRef, baseRef: 'main', open: true, draft: true, refsKnown: true });
+    const decision = r.send('decide', { frame: f });
+    assert.equal(decision.status, 'Planned', headRef);
+    assert.equal(decision.selected.length, 1, headRef);
+  }
+});
+
+test('valid branch refs still link the exact same-repository stack ancestor', async t => {
+  const r = await rig(t), parent = input(42), child = { ...input(43), baseRef: 'feature/ci+metrics' };
+  queue(r, child, execution(child, 200, 1, 2000)); queue(r, parent);
+  const f = frame([child, parent]);
+  f.prs.items.find(p => p.pr === 42).headRef = child.baseRef;
+  f.capacity.groups[0].slots = 1;
+  const decision = r.send('decide', { frame: f });
+  assert.deepEqual(decision.selected.map(q => q.input.pr), [42]);
+});
+
+test('malformed branch refs still make complete graph evidence Unknown', async t => {
+  for (const ref of ['', 'HEAD', '-leading', '/leading', 'trailing/', 'feature//child',
+    'feature/.hidden', 'feature/x.lock', 'feature/x.', 'feature/two..dots', 'space name',
+    'feature/ref@{1}', 'feature/tilde~', 'feature/caret^', 'feature/colon:', 'feature/question?',
+    'feature/star*', 'feature/bracket[', 'feature/back\\slash', 'feature/tab\t', 'feature/del\u007f']) {
+    assert.notEqual(spawnSync('git', ['check-ref-format', '--branch', ref]).status, 0, ref);
+    for (const field of ['headRef', 'baseRef']) {
+      const r = await rig(t), i = input(); queue(r, i);
+      const f = frame([i]); f.prs.items.push({ id: 999, repoId: EVO, pr: 99,
+        headRef: 'unrelated', baseRef: 'main', [field]: ref, open: true, draft: true, refsKnown: true });
+      assert.equal(r.send('decide', { frame: f }).status, 'Unknown', `${field}: ${ref}`);
+      assert.equal(r.c.snapshot(T).reservations.length, 0);
+    }
+  }
 });
