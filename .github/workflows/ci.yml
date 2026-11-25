@@ -46,6 +46,9 @@ jobs:
             workflow:
               - '.github/**'
             scripts:
+              # Generated reviewer equivalence must run even for workflow-only edits.
+              - '.github/workflows/_ai-review.yml'
+              - '.github/workflows/_ai-review-admission.yml'
               - 'AGENTS.md'
               - 'scripts/**'
               - 'governance/**'

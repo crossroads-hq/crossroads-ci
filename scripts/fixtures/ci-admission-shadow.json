@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "kind": "executable-local-shadow-model-not-native-proof",
+  "partialRecovery": [
+    { "workload": "Verify", "originRoot": 1000, "root": 2000, "heavy": 2001, "attempt": 2, "generation": 1 },
+    { "workload": "Storybook", "originRoot": 1010, "root": 3000, "heavy": 3001, "attempt": 3, "generation": 2 }
+  ]
+}
