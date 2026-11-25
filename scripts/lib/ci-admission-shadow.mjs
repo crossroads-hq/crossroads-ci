@@ -4,6 +4,8 @@ import { APPROVED, CANDIDATES, inputKey, executionKey, recoveryKey, ownerRequest
   ownerRequests, releaseDecision, recoveryDecision, failureLatch, newWorkDecision,
   permitDecision, accountingDay, reconciliationInterval, JOB_STATUSES, JOB_CONCLUSIONS } from './ci-admission.mjs';
 
+import { writerTransition, writerState, validateWriter, commandDigest, writerAudit } from './ci-admission-writer.mjs';
+
 const VERSION = 1;
 const MAX_RECORDS = 512, MAX_LEDGER = 2048, MAX_COMMANDS = 10000;
 const id = n => Number.isSafeInteger(n) && n > 0;
@@ -46,6 +48,7 @@ function initial() {
     inputs: [], obligations: [], requests: [], daily: {}, lastRecovery: {}, ledger: [], lastDecision: null };
 }
 function validateState(s) {
+  validateWriter(s);
   ensure(s?.version === VERSION && clock(s.lastAt) && clock(s.revision) && clock(s.generation) &&
     ['inputs', 'obligations', 'requests', 'ledger'].every(k => Array.isArray(s[k])) &&
     s.inputs.length <= MAX_RECORDS && s.obligations.length <= MAX_RECORDS && s.requests.length <= MAX_RECORDS &&
@@ -291,6 +294,12 @@ function settle(s, c, now) {
 }
 function transition(s, c) {
   const now = c.now;
+  if (c.type.startsWith('writer-')) return writerTransition(s, c, {
+    choose, bind, permit, prerequisites, capacity, current, ownerCurrent, record, byGeneration, active, answer, ensure });
+  // Legacy commands remain shadow simulations, never alternate writer receipts.
+  if (['bind', 'permit', 'lost'].includes(c.type)) ensure(!byGeneration(s, c.generation).writerManaged);
+  if (c.type === 'settle') ensure(!writerState(s).writes.some(w => w.generation === c.generation &&
+    ['intent', 'unresolved'].includes(w.state)));
   switch (c.type) {
     case 'queue': {
       const i = identity(c.input), x = execution(c.execution), key = inputKey(i);
@@ -387,23 +396,32 @@ export class ShadowController {
     return this.storage.transactionSync(() => {
       const s = this.read();
       const previous = this.exec('SELECT body FROM shadow_audit WHERE id = ?', c.id);
-      if (previous.length) return JSON.parse(previous[0].body).response;
+      if (previous.length) {
+        const saved = JSON.parse(previous[0].body);
+        if (c.type.startsWith('writer-') || saved.commandDigest) ensure(saved.commandDigest === commandDigest(c));
+        return saved.response;
+      }
       ensure(c.now >= s.lastAt && s.revision < MAX_COMMANDS);
+      const before = c.type.startsWith('writer-') ? clone(s) : null;
       const response = transition(s, c);
       s.revision++; s.lastAt = c.now;
       for (const o of s.obligations) if (o.policy === null) o.policy = c.policy;
       validateState(s);
+      const delta = before ? writerAudit(s, before, c) : null;
       const targetGenerations = c.type === 'decide' ? response.selected.map(q => q.generation) : id(c.generation) ? [c.generation] : [];
       const targets = targetGenerations.map(generation => {
         const o = s.obligations.find(o => o.generation === generation);
         return { input: o.input, execution: o.execution, generation, mutation: o.mutation, phase: o.phase,
           ownerKey: o.ownerKey, launch: o.launch, checkout: o.checkout };
       });
+      if (delta) for (const target of delta.targets) if (!targets.some(t => t.generation === target.generation)) targets.push(target);
       if (c.type === 'queue') { const r = record(s, inputKey(c.input)); targets.push({ input: r.input,
         execution: r.execution, readyAt: r.readyAt, intentCreatedAt: r.intentCreatedAt, ownerKey: r.ownerKey }); }
       if (c.type === 'owner') for (const q of s.requests) targets.push({ input: q.request.input,
         ownerKey: q.key, intentCreatedAt: q.intentCreatedAt, reentries: q.reentries });
-      const audit = { response, targets, actor: { kind: 'shadow-model',
+      const audit = { response, targets,
+        commandDigest: c.type.startsWith('writer-') ? commandDigest(c) : null,
+        writer: delta, actor: { kind: 'shadow-model',
         ownerId: c.type === 'owner' ? APPROVED.ownerId : null },
         evidenceAt: c.type === 'bind' && clock(c.jobs?.observedAt) ? c.jobs.observedAt :
           ['settle', 'consume'].includes(c.type) && clock(c.evidence?.observedAt) ? c.evidence.observedAt : null,
@@ -422,6 +440,6 @@ export class ShadowController {
       stale: !fresh(s.lastAt, now), revision: s.revision, cursor: s.cursor, inputs: clone(s.inputs),
       reservations: clone(active(s)).map(o => ({ ...o, reconciliationMs: reconciliationInterval(o.launch?.issuedAt, now) })),
       history: clone(s.obligations.filter(o => o.released)), daily: clone(s.daily), requests: clone(s.requests),
-      accounting: accounting(s), ledger: clone(s.ledger), lastDecision: clone(s.lastDecision), effects: [] };
+      accounting: accounting(s), ledger: clone(s.ledger), writer: clone(writerState(s)), lastDecision: clone(s.lastDecision), effects: [] };
   }
 }
