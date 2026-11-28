@@ -236,9 +236,16 @@ jobs:
           # fetch-depth 0, contract resolution, confirmation, reporting); 2
           # minutes is that with an order of magnitude to spare.
           OVERHEAD_MARGIN: 2
+          CODEX_FIRST: ${{ inputs.codex-first }}
         run: |
           set -euo pipefail
-          codex_minutes=$(( (CODEX_WAIT + 59) / 60 ))
+          # On demand the Codex wait step is skipped, so it costs nothing;
+          # counting it would refuse budgets that actually fit.
+          if [ "$CODEX_FIRST" = "false" ]; then
+            codex_minutes=0
+          else
+            codex_minutes=$(( (CODEX_WAIT + 59) / 60 ))
+          fi
           needed=$(( codex_minutes + REVIEW_TIMEOUT + OVERHEAD_MARGIN ))
           if [ "$needed" -gt "$JOB_TIMEOUT" ]; then
             {

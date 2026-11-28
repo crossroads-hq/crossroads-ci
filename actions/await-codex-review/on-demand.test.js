@@ -92,6 +92,45 @@ test("the default concurrency group is unchanged; on-demand gets its own", () =>
   assert.equal(job.concurrency["cancel-in-progress"], true);
 });
 
+function runBudget(env) {
+  const marker = "      - name: Check the review budget fits the job timeout\n";
+  const start = workflowText.indexOf(marker);
+  assert.notEqual(start, -1);
+  const runStart = workflowText.indexOf("        run: |\n", start) + "        run: |\n".length;
+  const body = [];
+  for (const line of workflowText.slice(runStart).split("\n")) {
+    if (line !== "" && !line.startsWith("          ")) break;
+    body.push(line.slice(10));
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "on-demand-budget-"));
+  const result = childProcess.spawnSync("bash", ["-c", body.join("\n")], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      GITHUB_STEP_SUMMARY: path.join(dir, "summary"),
+      REVIEW_TIMEOUT: "30",
+      CODEX_WAIT: "300",
+      OVERHEAD_MARGIN: "2",
+      ...env,
+    },
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return result;
+}
+
+test("the budget guard counts the Codex wait only when Codex-first", () => {
+  // 0 + 30 + 2 = 32 fits 35 on demand; 5 + 30 + 2 = 37 does not, Codex-first.
+  const onDemand = runBudget({ CODEX_FIRST: "false", JOB_TIMEOUT: "35" });
+  assert.equal(onDemand.status, 0, onDemand.stderr);
+  const codexFirst = runBudget({ CODEX_FIRST: "true", JOB_TIMEOUT: "35" });
+  assert.notEqual(codexFirst.status, 0);
+  assert.match(codexFirst.stderr, /needs 37m but the job timeout is 35m/);
+  // On demand is still bounded by the review and overhead.
+  const tooTight = runBudget({ CODEX_FIRST: "false", JOB_TIMEOUT: "31" });
+  assert.notEqual(tooTight.status, 0);
+  assert.match(tooTight.stderr, /needs 32m but the job timeout is 31m/);
+});
+
 function runDedup(codexFirst) {
   const marker = "      - name: Check whether Claude already reviewed this head SHA\n";
   const start = workflowText.indexOf(marker);
