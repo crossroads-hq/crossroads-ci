@@ -21,7 +21,7 @@ const condition = (expression, state = {}) => {
   // Job success/cancellation is also checked separately: absent a status
   // function, Actions implicitly requires success(). This is a fixture model.
   const vm = require('node:vm');
-  const s = { inputs: { 'admission-enabled': true }, needs: { 'admission-ai': { result: 'success' } },
+  const s = { inputs: { 'admission-enabled': true, 'codex-first': true }, needs: { 'admission-ai': { result: 'success' } },
     github: { event_name: 'pull_request', actor: 'owner', repository: 'org/repo',
       event: { pull_request: { draft: false, title: 'Change', head: { repo: { full_name: 'org/repo' } } } } },
     steps: { changes: { outputs: {} }, dedup: { outputs: {} }, codex: { outputs: {} }, review: {}, posted: {} },

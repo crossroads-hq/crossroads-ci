@@ -157,6 +157,68 @@ jobs:
               "Supply chain": "${{ needs.supply-chain.result }}" }
 ```
 
+### On-demand Claude review (`claude-review` label)
+
+A person can ask for a Claude review at any time by adding the
+`claude-review` label to a pull request, from GitHub's Labels menu or from
+Linear (••• → Labels). GitHub cannot request a bot as a reviewer, so the label
+is the request. A separate caller workflow, in the consumer repository, runs
+the same reusable workflow with `codex-first: false`. That run does not wait
+for Codex and does not skip a head SHA already reviewed. It reviews drafts as
+well. It uses a concurrency group of its own, so it never cancels the
+automatic review on the same PR or gets cancelled by it.
+
+```yaml
+# .github/workflows/claude-review.yml
+name: Claude review
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  review:
+    if: github.event.label.name == 'claude-review'
+    uses: crossroads-hq/crossroads-ci/.github/workflows/_ai-review.yml@<commit-sha>
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+      id-token: write
+    with:
+      codex-first: false
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # Removing the label means adding it again requests a fresh review.
+  unlabel:
+    needs: review
+    if: always() && github.event.label.name == 'claude-review'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr edit "$PR" --repo "$REPO" --remove-label claude-review
+```
+
+Never add `labeled` to the workflow that reports `PR Validation`. Its
+PR-keyed concurrency would cancel and restart the whole CI run for every
+label change. The label is not a required check.
+
+Two limits:
+
+- **The key must be shared with the consumer.** The fleet `ANTHROPIC_API_KEY`
+  is shared only with the private repositories, so this repository (public)
+  has no on-demand caller.
+- **It cannot review its own introduction.** The reviewer action refuses to
+  run when the calling workflow differs from the default-branch copy. So the
+  label works on pull requests opened after `claude-review.yml` merges, not on
+  the pull request that adds it.
+
 ### Fleet drift audit
 
 `.github/workflows/fleet-drift-audit.yml` runs `scripts/audit-fleet-drift.sh`

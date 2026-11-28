@@ -55,6 +55,25 @@ on:
         # PR #20 measured a Codex review arriving about 190 seconds after the
         # wait began, just beyond the former 180-second default.
         default: 300
+      codex-first:
+        description: >-
+          True (the default, and every existing caller): Claude is the
+          fallback reviewer. It runs only when no verified Codex review
+          arrives within `codex-wait-seconds`, skips a head SHA it already
+          reviewed, and skips draft pull requests.
+
+          False: an explicit, on-demand request for a Claude review, as sent
+          by a caller that fires on a `claude-review` label. Claude reviews
+          now: no Codex wait (`codex-wait-seconds` is ignored), no head-SHA
+          dedup (asking again means review again), and drafts are reviewed
+          too, because the label is how a person asks for a review before
+          marking a PR ready. Every other guard (event, fork, Dependabot,
+          `[skip-ai-review]`, anti-tamper, base-ref contract) still applies.
+          Use it only from a caller that a person triggers deliberately: on an
+          automatic trigger it would pay for a Claude review of every push.
+        type: boolean
+        required: false
+        default: true
       job-timeout-minutes:
         description: >-
           Ceiling for the whole job. Exposed as an input only so the pre-flight
@@ -115,7 +134,7 @@ jobs:
       inputs.admission-enabled &&
       github.event_name == 'pull_request' &&
       github.actor != 'dependabot[bot]' &&
-      !github.event.pull_request.draft &&
+      (!github.event.pull_request.draft || !inputs.codex-first) &&
       !contains(github.event.pull_request.title, '[skip-ai-review]') &&
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -140,12 +159,14 @@ jobs:
     # actions-group PRs edit workflow files, which the review action's
     # anti-tamper guard refuses to run against. Both were measured on PR #20
     # -- the job can only fail, so it must not start.
+    # Drafts are skipped only in the default Codex-first mode; an on-demand
+    # request (`codex-first: false`) is a person asking for review of a draft.
     if: >-
       inputs.admission-enabled &&
       needs.admission-ai.result == 'success' &&
       github.event_name == 'pull_request' &&
       github.actor != 'dependabot[bot]' &&
-      !github.event.pull_request.draft &&
+      (!github.event.pull_request.draft || !inputs.codex-first) &&
       !contains(github.event.pull_request.title, '[skip-ai-review]') &&
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -176,8 +197,14 @@ jobs:
     # superseded instead of queueing behind it -- which is the cost bound this
     # workflow claims. A cancelled review is not a lost one: the SHA is never
     # recorded, so the surviving run reviews the state that matters.
+    #
+    # On-demand runs (`codex-first: false`) get a group of their own. Sharing
+    # one would let a `claude-review` label cancel the automatic run on the
+    # same PR, and the next push cancel the requested review. The default
+    # group string is unchanged, so existing callers keep the exact group
+    # they had; cancel-in-progress still applies within each.
     concurrency:
-      group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      group: crossroads-ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}${{ !inputs.codex-first && '-on-demand' || '' }}
       cancel-in-progress: true
     steps:
       # Every actual attempt verifies before ANY checkout, install or reviewer.
@@ -406,8 +433,17 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          CODEX_FIRST: ${{ inputs.codex-first }}
         run: |
           set -euo pipefail
+          # An on-demand request is a request to review NOW, even a head this
+          # caller already reviewed. Still writes `skip`, explicitly, so every
+          # later step's `skip == 'false'` guard reads a real value.
+          if [ "$CODEX_FIRST" = "false" ]; then
+            echo "On-demand review requested; not deduplicating head ${HEAD_SHA}." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Scoped to the CALLER'S OWN WORKFLOW FILE, not to any check run that
           # happens to carry this job's name. A check run records no workflow
           # path -- measured: name and app only -- so matching on the name
@@ -464,9 +500,11 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Skipped on demand, which leaves `reviewed` unset and therefore
+      # `!= 'true'`: every step below treats Codex as not having reviewed.
       - name: Wait for Codex review
         id: codex
-        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false'
+        if: steps.changes.outputs.reviewable == 'true' && steps.dedup.outputs.skip == 'false' && inputs.codex-first
         uses: crossroads-hq/crossroads-ci/actions/await-codex-review@36410e8c5f83a0f3b172191852223c0ec7bc3956 # main after #68 and #71
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
